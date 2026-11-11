@@ -33,6 +33,13 @@
     "button": {
       "save_nvm": { "name": "Save to NVM" },
       "scan": { "name": "Scan the line" }
+    },
+    "sensor": {
+      "temp_cpu": { "name": "CPU temperature" },
+      "temp_led1": { "name": "LED board 1 temperature" },
+      "temp_led2": { "name": "LED board 2 temperature" },
+      "currents": { "name": "Currents" },
+      "line_status": { "name": "Cards online" }
     }
   },
   "services": {

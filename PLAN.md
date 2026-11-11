@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.8 — 2026-11-11 — phase 5 réalisée (sensors températures/courants/ligne, 40 tests OK).
 > Version : 0.7 — 2026-11-11 — phase 4 réalisée (boutons save/scènes/scan, 36 tests OK).
 > Version : 0.6 — 2026-11-11 — phase 3 réalisée (selects recette/groupe, 31 tests OK).
 > Version : 0.5 — 2026-11-11 — phase 2 réalisée (entité light, 25 tests OK).
@@ -230,9 +231,11 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] `const.scenes_dir_for()` : dossier `scenes/` = voisin du dossier `recipes_dir`.
 - [x] Tests : `@WP` envoyé + événement, save sur carte muette → erreur + événement, scène appliquée + événement + `last_recipe`, scène avec recette manquante → erreur par carte, scan découvrant un nouveau SPOT. **36 tests passed**.
 
-### Phase 5 — `sensor`s
-- [ ] Températures CPU/LED1/LED2 (device_class temperature), courants (résumé + attribut), état de la ligne.
-- [ ] Tests : décodage `@GT`, carte muette → `unavailable`.
+### Phase 5 — `sensor`s — FAITE (2026-11-11)
+- [x] `sensor.py` : 3 capteurs température par SPOT (`device_class: temperature`, `state_class: measurement`, °C → **historisés par le recorder HA**, D13), 1 capteur « Courants » (résumé `format_currents` + attribut `channels` détaillé), 1 capteur hub « Cartes en ligne » (état = compte, attributs `online`/`offline`/`total`).
+- [x] Carte muette → capteurs `unknown` (pas `unavailable` : la entité reste available, la valeur est inconnue).
+- [x] `entity.add_spot_entities_listener` accepte une factory retournant une liste d'entités.
+- [x] Tests : valeurs températures + device_class/state_class/unité, résumé courants + attribut channels, carte muette → unknown, line_status online/offline. **40 tests passed**.
 
 ### Phase 6 — Services + traductions
 - [ ] `services.yaml` + handlers (section 5), `translations/fr.json` + `en.json`.
@@ -287,3 +290,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 2 | `light.py` (ColorMode.BRIGHTNESS, mapping D10, D11) + commandes du coordinator ; 25 tests passed | Après une commande, refresh direct (`async_refresh`) au lieu du debouncer — sinon l'état restait à la valeur précédente dans les 10 s de cooldown |
 | 2026-11-11 | Phase 3 | `select.py` recette/groupe + événements + helper `add_spot_entities_listener` ; 31 tests passed | Options des selects mises en cache et rafraîchies à chaque update du coordinator (lecture disque en executor, jamais dans le event loop) |
 | 2026-11-11 | Phase 4 | `button.py` (save/scènes/scan) + `coordinator.async_apply_scene` ; 36 tests passed | Boutons scène au niveau du hub (device adaptateur) ; dossier scènes dérivé de `recipes_dir` (`scenes/` voisin) |
+| 2026-11-11 | Phase 5 | `sensor.py` (3 températures historisées + courants + line_status hub) ; 40 tests passed | `state_class: measurement` sur les températures pour l'historique recorder ; carte muette = `unknown` plutôt que `unavailable` |

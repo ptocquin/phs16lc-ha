@@ -57,13 +57,14 @@ def add_spot_entities_listener(
 
     @callback
     def _add_new_spots() -> None:
-        new = [
-            factory(address)
-            for address in coordinator.data.spots
-            if address not in known
-        ]
-        for entity in new:
-            known.add(entity.address)
+        new = []
+        for address in coordinator.data.spots:
+            if address in known:
+                continue
+            result = factory(address)
+            entities = result if isinstance(result, list) else [result]
+            new.extend(entities)
+            known.add(address)
         if new:
             async_add_entities(new)
 

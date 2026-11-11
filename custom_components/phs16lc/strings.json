@@ -33,6 +33,13 @@
     "button": {
       "save_nvm": { "name": "Sauvegarder NVM" },
       "scan": { "name": "Scanner la ligne" }
+    },
+    "sensor": {
+      "temp_cpu": { "name": "Température CPU" },
+      "temp_led1": { "name": "Température LED 1" },
+      "temp_led2": { "name": "Température LED 2" },
+      "currents": { "name": "Courants" },
+      "line_status": { "name": "Cartes en ligne" }
     }
   },
   "services": {
