@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 1.2 — 2026-11-11 — phase 9 : outillage de déploiement livré (package_release.py + deploy_to_linux.sh, 57 tests OK) ; install sur mini-PC en attente du matériel.
 > Version : 1.1 — 2026-11-11 — phase 8 (E2E sans matériel sur le Mac) réalisée et validée, 54 tests OK, fix `via_device_id` (D19).
 > Version : 1.0 — 2026-11-11 — phase 7 réalisée (options flow + diagnostics + lint, 53 tests OK).
 > Version : 0.9 — 2026-11-11 — phase 6 réalisée (services phs16lc.*, 50 tests OK).
@@ -260,7 +261,7 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 
 ### Phase 9 — Déploiement sur le PC Linux dédié
 - [ ] Installer HA (OS ou Container) sur le mini-PC — GUIDE §4.
-- [ ] Copier `custom_components/phs16lc/` dans `/config/custom_components/` (ou dépôt privé + Marketplace) — **aucun changement de code** (D18).
+- [x] Outillage de déploiement livré : `tools/package_release.py` (zip `dist/phs16lc-<version>.zip`, layout racine HACS/Marketplace, testé) et `tools/deploy_to_linux.sh <cible-ssh> [config-dir]` (tar over SSH vers `/config/custom_components/phs16lc/`) — **aucun changement de code** (D18), GUIDE §4.3.
 - [ ] Reconfigurer l'intégration avec `/dev/ttyUSB0` (règle udev `/dev/phs16bus` recommandée, GUIDE §6).
 - [ ] Rejouer la checklist de validation (GUIDE §4.5) sur le vrai bus en production.
 - [ ] Mise à jour du GUIDE avec captures/retours d'expérience.
@@ -302,3 +303,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 7 | Options flow + reload à chaud, `diagnostics.py`, `entry_value()`, ruff (vendored exclu), 53 tests passed | Options flow via `hass.config_entries.options.async_init` (pas `.flow`) ; `vol` default devenu factory (lambda) en 2026.11 ; carte morte au scan initial = non découverte (comportement scan_line) |
 | 2026-11-11 | Phase 8 | E2E sans matériel validé sur le Mac (HA 2026.11.1 en venv `hass -c ~/.hass_dev`, `fake_spot.py --boards 3` sur pty, pilotage par API REST) : 46 entités (3 lights, 6 selects, 4 boutons, 10 sensors, 3 binary_sensors), `light.turn_on` brightness 200 → `@SP 0x1 1702×16`, recette `croissance.json` → `800×8 + 0×8`, scène `serre.json` → spot 2 en partiel `500×8 + 1200×8` et carte 4 absente comptabilisée en erreur sans plantage, `@WP` save OK, rescan OK, événements `phs16lc_recipe_applied/scene_applied/saved/scan` bien écrits dans le recorder (table `events` de `home-assistant_v2.db`) → logbook/historique | Recettes copiées dans `~/.hass_dev/phs16lc/recipes` ; onboarding + config flow faits en API (`POST /auth/token`, pas `/api/auth/token`) ; gotchas documentés GUIDE §3.4.1 : `fake_spot.py --duration` (120 s par défaut) à passer long, symlink stable `/tmp/phs_pty` (le pty change de nom à chaque lancement), **redémarrer le process hass** après une modif de code (le reload d'entry ne réimporte pas les modules) |
 | 2026-11-11 | D19 | `DeviceInfo.via_device` (tuple) remplacé par `via_device_id` (id registry du hub créé via `ensure_hub_device()` dans `async_setup_entry`) | HA 2026.11 déprécie `via_device` (suppression 2027.8) et lève `MissingIntegrationFrame` → « Error adding entity None » sur les selects des SPOT 2/3 en live ; test de régression `test_spot_devices_link_to_hub_via_device_id`, 54 tests passed, 0 erreur au boot live |
+| 2026-11-11 | Phase 9 (outils) | `tools/package_release.py` : zip de release `phs16lc-<version>.zip` au layout racine HACS (hacs.json, brand/, custom_components/phs16lc/ sans __pycache__) ; `tools/deploy_to_linux.sh` : déploiement tar-over-SSH vers `/config/custom_components/` ; `tests/test_release.py` (layout du zip, vendored embarqué, script) → 57 tests passed | Déploiement « plug and play » sur le mini-PC sans toucher au code (D18) ; le zip sert aussi de release GitLab et le dépôt de « custom repo » Marketplace (GUIDE §4.3) |

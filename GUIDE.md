@@ -4,6 +4,7 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.6 — 2026-11-11 — outils de déploiement documentés (§4.3 : package_release.py + deploy_to_linux.sh).
 > Version : 0.5 — 2026-11-11 — procédure E2E sans matériel (fake_spot + API REST) validée et documentée (§3.4.1).
 > Version : 0.4 — 2026-11-11 — benchmark mini-PC N100 et shortlist documentés (§2.1).
 > Version : 0.3 — 2026-11-11 — question « Mac mini refurbished ? » tranchée et
@@ -356,13 +357,26 @@ sudo docker run -d \
 
 L'intégration vit dans ce dépôt : [`custom_components/phs16lc/`](custom_components/phs16lc/).
 
-**Méthode 1 — copie manuelle (recommandée pour un usage privé)** :
+**Méthode 1 — copie manuelle ou script (recommandée pour un usage privé)** :
 
 ```sh
-# Sur la machine HA (via l'add-on Terminal & SSH, ou en copiant le dossier à la main)
+# Depuis le Mac de développement, en une commande (tar over SSH, aucun outil
+# requis côté cible hormis ssh+tar) :
+ha-integration/tools/deploy_to_linux.sh ha@192.168.1.50            # HA OS : /config par défaut
+ha-integration/tools/deploy_to_linux.sh root@mini-pc /var/lib/hass # conteneur : chemin de la config
+# puis redémarrer Home Assistant sur la cible (Réglages → Système → Redémarrer)
+
+# Équivalent manuel (add-on Terminal & SSH sur la cible) :
 mkdir -p /config/custom_components
-# copier le dossier custom_components/phs16lc/ du dépôt vers /config/custom_components/phs16lc/
-# puis redémarrer Home Assistant (Réglages → Système → Redémarrer)
+# copier custom_components/phs16lc/ du dépôt vers /config/custom_components/phs16lc/
+```
+
+**Méthode 1b — zip de release** (pièce jointe de release GitLab, ou à déposer à la
+main dans `/config/custom_components/`) :
+
+```sh
+python3 ha-integration/tools/package_release.py --dest dist   # → dist/phs16lc-<version>.zip
+# layout du zip = racine du dépôt ha-integration/ : hacs.json, brand/, custom_components/phs16lc/
 ```
 
 **Méthode 2 — dépôt git privé + Marketplace** (mises à jour en un clic, avec
