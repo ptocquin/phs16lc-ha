@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.5 — 2026-11-11 — phase 2 réalisée (entité light, 25 tests OK).
 > Version : 0.4 — 2026-11-11 — phase 1 réalisée (coordinator + présence, 17 tests OK).
 > Version : 0.3 — 2026-11-11 — phase 0 réalisée (squelette + vendored phs16ctl + tests OK).
 > Version : 0.2 — 2026-11-11 — ajout de la boucle de développement/test sur
@@ -207,9 +208,11 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] Tests (FakePhsLink, fixtures `pytest-homeassistant`) : flow, setup+scan, doublon de port, carte muette au polling, rescan avec nouvelle carte, unload ferme le port, port indisponible → SETUP_RETRY. **17 tests passed**.
 - [x] Note : contrat `DataUpdateCoordinator._async_setup` changé en HA 2026.11 (retourne `None`, renseigne `self.data`) — corrigé et couvert par les tests.
 
-### Phase 2 — Entité `light`
-- [ ] `light.py` : état on/off + brightness (mapping D10), `turn_on`/`turn_off` (D11), `supported_color_modes = {ColorMode.BRIGHTNESS}`.
-- [ ] Tests : mapping mA↔brightness, turn_on avec/sans brightness, recette non uniforme.
+### Phase 2 — Entité `light` — FAITE (2026-11-11)
+- [x] `light.py` : `SpotLight` (entité principale du device « SPOT n », `name=None`), `ColorMode.BRIGHTNESS` ; état on = au moins un canal ≥ 74 mA, brightness = courant max (D10) ; `turn_on(brightness)` = tous canaux à `brightness_to_ma(b)` ; `turn_on()` sans luminosité = dernière recette (`SpotState.last_recipe`) sinon 500 mA (D11) ; `turn_off()` = zéros ; carte muette → `HomeAssistantError`.
+- [x] `coordinator.py` : commandes `async_set_channels` / `async_apply_recipe` / `async_save` (I/O via `async_io`), `SpotState.last_recipe` ; **refresh direct** (`async_refresh`, pas le debouncer) après chaque commande pour un état immédiat.
+- [x] `const.py` : `ma_to_brightness` renvoie au moins 1 si allumé (≥ 74 mA).
+- [x] Tests : mapping mA↔brightness (aller-retour), état reflété par le polling, recette non uniforme (brightness = max), turn_on avec/sans brightness, réapplication recette (D11), turn_off, carte muette → erreur. **25 tests passed**.
 
 ### Phase 3 — `select` recette + groupe
 - [ ] Scan du dossier recettes (recipes_dir) → options des selects.
@@ -274,3 +277,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | D16–D18 | Ajout dev local MacBook Pro + déploiement Linux sans changement de code ; harnais de test = `pytest-homeassistant` (package central 2026.11) | Développement/test sur ce Mac (macOS 26.6, FTDI VCP à valider, port `/dev/cu.usbserial-XXXX`), puis déploiement sur PC Linux (`/dev/ttyUSB0`) avec le même code |
 | 2026-11-11 | Phase 0 | Squelette créé : manifest/hacs.json/brand/config_flow/services/strings+translations, `sync_phs16ctl.py` + copie vendored (5 modules), pyproject, 10 tests OK | Démarrage de l'implémentation ; pin pyserial==3.5 = pin HA core 2026.11 (vérifié dans `package_constraints.txt`) ; catégorie `lighting.lighting_systems` (catégories 2026.11 hiérarchiques) |
 | 2026-11-11 | Phase 1 | `coordinator.py` + `entity.py` + `binary_sensor.py` + setup/unload dans `__init__.py` ; 17 tests passed (FakePhsLink + pytest-homeassistant) | Contrat `_async_setup` 2026.11 (set `self.data`, retourne None) découvert via les tests et corrigé ; `async_io()` sérialise l'accès au port série |
+| 2026-11-11 | Phase 2 | `light.py` (ColorMode.BRIGHTNESS, mapping D10, D11) + commandes du coordinator ; 25 tests passed | Après une commande, refresh direct (`async_refresh`) au lieu du debouncer — sinon l'état restait à la valeur précédente dans les 10 s de cooldown |

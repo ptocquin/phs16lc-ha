@@ -15,13 +15,14 @@ import functools
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_EXPECTED_SPOTS, CONF_POLL_INTERVAL, DOMAIN
-from .phs16ctl.controller import Luminaire, LuminaireError, scan_line
+from .const import CONF_EXPECTED_SPOTS, CONF_POLL_INTERVAL, CONF_RECIPES_DIR, DOMAIN
+from .phs16ctl.controller import Luminaire, LuminaireError, Recipe, scan_line
 from .phs16ctl.link import T_GI, PhsLink
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class SpotState:
     online: bool = False
     currents: list[int] | None = None  # @GP (mA par canal)
     temperatures: tuple[float, float, float] | None = None  # @GT (cpu, led1, led2)
+    last_recipe: str | None = None  # dernière recette appliquée en entier (D11)
 
 
 @dataclass
@@ -114,5 +116,39 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             if spot.address not in addresses:
                 spot.online = False
         _LOGGER.info("Rescan PHS16-LC : %d carte(s) : %s", len(addresses), addresses)
-        await self.async_request_refresh()
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
         return addresses
+
+    # ------------------------------------------------------------------
+    # Commandes (phases 2+ : light, select, button, services)
+    # ------------------------------------------------------------------
+    async def async_set_channels(self, address: int, currents: list[int]) -> None:
+        """Règle chaque canal d'une carte (@SP). Lève LuminaireError si la carte ne répond pas."""
+        lum = Luminaire(address=address, link=self.link, channels=len(currents))
+        await self.async_io(lum.set_channels, currents)
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
+
+    async def async_apply_recipe(self, address: int, recipe_name: str, group: str | None = None) -> None:
+        """Applique une recette du dossier configuré à une carte (application partielle si `group`)."""
+        recipe_path = Path(str(self.entry.data[CONF_RECIPES_DIR])) / recipe_name
+
+        def _do() -> None:
+            recipe = Recipe.from_file(recipe_path)
+            lum = Luminaire(address=address, link=self.link)
+            lum.apply_recipe(recipe, group=group)
+
+        await self.async_io(_do)
+        spot = self.data.spots.get(address)
+        if spot is not None and group is None:
+            spot.last_recipe = recipe_name
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
+
+    async def async_save(self, address: int) -> None:
+        """Sauvegarde les courants en NVM (@WP)."""
+        lum = Luminaire(address=address, link=self.link)
+        await self.async_io(lum.save)
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()

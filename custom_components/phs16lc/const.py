@@ -33,7 +33,10 @@ def brightness_to_ma(brightness: int) -> int:
 
 
 def ma_to_brightness(ma: int) -> int:
-    """Courant mA → luminosité HA 0..255 (inverse de brightness_to_ma)."""
+    """Courant mA → luminosité HA 0..255 (inverse de brightness_to_ma).
+
+    Un canal allumé (≥ 74 mA) donne au moins brightness 1, même à 74 mA.
+    """
     if ma < CURRENT_MIN_MA:
         return 0
-    return round((ma - CURRENT_MIN_MA) * 255 / (CURRENT_MAX_MA - CURRENT_MIN_MA))
+    return max(1, round((ma - CURRENT_MIN_MA) * 255 / (CURRENT_MAX_MA - CURRENT_MIN_MA)))
