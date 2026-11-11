@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.6 — 2026-11-11 — phase 3 réalisée (selects recette/groupe, 31 tests OK).
 > Version : 0.5 — 2026-11-11 — phase 2 réalisée (entité light, 25 tests OK).
 > Version : 0.4 — 2026-11-11 — phase 1 réalisée (coordinator + présence, 17 tests OK).
 > Version : 0.3 — 2026-11-11 — phase 0 réalisée (squelette + vendored phs16ctl + tests OK).
@@ -214,10 +215,12 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] `const.py` : `ma_to_brightness` renvoie au moins 1 si allumé (≥ 74 mA).
 - [x] Tests : mapping mA↔brightness (aller-retour), état reflété par le polling, recette non uniforme (brightness = max), turn_on avec/sans brightness, réapplication recette (D11), turn_off, carte muette → erreur. **25 tests passed**.
 
-### Phase 3 — `select` recette + groupe
-- [ ] Scan du dossier recettes (recipes_dir) → options des selects.
-- [ ] Application complète / partielle via executor + événement `phs16lc_recipe_applied`.
-- [ ] Tests : recette inconnue, groupe inconnu, validation bornes (héritée de `Recipe.validate`).
+### Phase 3 — `select` recette + groupe — FAITE (2026-11-11)
+- [x] `select.py` : `SpotRecipeSelect` (options = `*.json` de `recipes_dir`, cache lu en executor et rafraîchi à chaque update du coordinator) et `SpotGroupSelect` (options = groupes de la recette courante) ; application complète / partielle via `coordinator.async_apply_recipe` ; `last_recipe` / `last_group` mémorisés dans `SpotState`.
+- [x] Événement `phs16lc_recipe_applied` (ok/erreur) à chaque application → logbook HA.
+- [x] `entity.py` : helper `add_spot_entities_listener` (entités créées aussi pour les SPOT découverts au rescan).
+- [x] Erreurs : recette/groupe inconnu ou carte muette → `HomeAssistantError` + événement ok=False.
+- [x] Tests : liste des recettes, application complète + événement, groupe partiel (base @GP préservée hors groupe), recette/groupe inconnus, carte muette. **31 tests passed**.
 
 ### Phase 4 — `button`s
 - [ ] `save_nvm` par carte, `scene_<nom>` par fichier de scène, `scan`.
@@ -278,3 +281,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 0 | Squelette créé : manifest/hacs.json/brand/config_flow/services/strings+translations, `sync_phs16ctl.py` + copie vendored (5 modules), pyproject, 10 tests OK | Démarrage de l'implémentation ; pin pyserial==3.5 = pin HA core 2026.11 (vérifié dans `package_constraints.txt`) ; catégorie `lighting.lighting_systems` (catégories 2026.11 hiérarchiques) |
 | 2026-11-11 | Phase 1 | `coordinator.py` + `entity.py` + `binary_sensor.py` + setup/unload dans `__init__.py` ; 17 tests passed (FakePhsLink + pytest-homeassistant) | Contrat `_async_setup` 2026.11 (set `self.data`, retourne None) découvert via les tests et corrigé ; `async_io()` sérialise l'accès au port série |
 | 2026-11-11 | Phase 2 | `light.py` (ColorMode.BRIGHTNESS, mapping D10, D11) + commandes du coordinator ; 25 tests passed | Après une commande, refresh direct (`async_refresh`) au lieu du debouncer — sinon l'état restait à la valeur précédente dans les 10 s de cooldown |
+| 2026-11-11 | Phase 3 | `select.py` recette/groupe + événements + helper `add_spot_entities_listener` ; 31 tests passed | Options des selects mises en cache et rafraîchies à chaque update du coordinator (lecture disque en executor, jamais dans le event loop) |

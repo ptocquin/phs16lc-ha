@@ -25,6 +25,10 @@
   "entity": {
     "binary_sensor": {
       "spot_online": { "name": "En ligne" }
+    },
+    "select": {
+      "recipe": { "name": "Recette" },
+      "group": { "name": "Groupe" }
     }
   },
   "services": {

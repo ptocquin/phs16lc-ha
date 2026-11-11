@@ -37,6 +37,7 @@ class SpotState:
     currents: list[int] | None = None  # @GP (mA par canal)
     temperatures: tuple[float, float, float] | None = None  # @GT (cpu, led1, led2)
     last_recipe: str | None = None  # dernière recette appliquée en entier (D11)
+    last_group: str | None = None  # dernier groupe appliqué en partiel (select « Groupe »)
 
 
 @dataclass

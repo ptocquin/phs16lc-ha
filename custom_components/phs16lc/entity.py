@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -40,3 +43,29 @@ class Phs16Entity(CoordinatorEntity[Phs16Coordinator]):
         self.address = address
         self._attr_device_info = spot_device_info(coordinator.entry.entry_id, address)
         self._attr_unique_id = f"{coordinator.entry.entry_id}_spot_{address}_{entity_key}"
+
+
+def add_spot_entities_listener(
+    hass,
+    entry,
+    coordinator: Phs16Coordinator,
+    async_add_entities,
+    factory: Callable[[int], Phs16Entity],
+) -> None:
+    """Crée `factory(address)` pour chaque SPOT connu, et à chaque rescan (listener)."""
+    known: set[int] = set()
+
+    @callback
+    def _add_new_spots() -> None:
+        new = [
+            factory(address)
+            for address in coordinator.data.spots
+            if address not in known
+        ]
+        for entity in new:
+            known.add(entity.address)
+        if new:
+            async_add_entities(new)
+
+    _add_new_spots()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_spots))
