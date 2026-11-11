@@ -21,8 +21,16 @@ from typing import Any, Callable
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_EXPECTED_SPOTS, CONF_POLL_INTERVAL, CONF_RECIPES_DIR, DOMAIN
-from .phs16ctl.controller import Luminaire, LuminaireError, Recipe, scan_line
+from .const import CONF_EXPECTED_SPOTS, CONF_POLL_INTERVAL, CONF_RECIPES_DIR, DOMAIN, scenes_dir_for
+from .phs16ctl.controller import (
+    CardResult,
+    Luminaire,
+    LuminaireError,
+    Recipe,
+    Scene,
+    apply_scene,
+    scan_line,
+)
 from .phs16ctl.link import T_GI, PhsLink
 
 _LOGGER = logging.getLogger(__name__)
@@ -153,3 +161,23 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         await self.async_io(lum.save)
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
+
+    async def async_apply_scene(self, scene_name: str, save: bool = False) -> list[CardResult]:
+        """Applique un fichier de scène (dossier `scenes/` à côté de `recipes_dir`)."""
+        scene_path = scenes_dir_for(str(self.entry.data[CONF_RECIPES_DIR])) / scene_name
+
+        def _do() -> tuple[Scene, list[CardResult]]:
+            scene = Scene.from_file(scene_path)
+            results = apply_scene(self.link, scene, scene_path, save=save)
+            return scene, results
+
+        scene, results = await self.async_io(_do)
+        for target in scene.targets:
+            if target.group is None:
+                for address in target.addresses:
+                    spot = self.data.spots.get(address)
+                    if spot is not None:
+                        spot.last_recipe = target.recipe_ref
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
+        return results

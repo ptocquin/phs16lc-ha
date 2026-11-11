@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.7 — 2026-11-11 — phase 4 réalisée (boutons save/scènes/scan, 36 tests OK).
 > Version : 0.6 — 2026-11-11 — phase 3 réalisée (selects recette/groupe, 31 tests OK).
 > Version : 0.5 — 2026-11-11 — phase 2 réalisée (entité light, 25 tests OK).
 > Version : 0.4 — 2026-11-11 — phase 1 réalisée (coordinator + présence, 17 tests OK).
@@ -222,9 +223,12 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] Erreurs : recette/groupe inconnu ou carte muette → `HomeAssistantError` + événement ok=False.
 - [x] Tests : liste des recettes, application complète + événement, groupe partiel (base @GP préservée hors groupe), recette/groupe inconnus, carte muette. **31 tests passed**.
 
-### Phase 4 — `button`s
-- [ ] `save_nvm` par carte, `scene_<nom>` par fichier de scène, `scan`.
-- [ ] Tests : `@WP`, scène multi-cartes avec une carte en erreur.
+### Phase 4 — `button`s — FAITE (2026-11-11)
+- [x] `button.py` : `SpotSaveButton` (« Sauvegarder NVM », `@WP`, événement `phs16lc_saved`) par SPOT ; `ScanButton` (« Scanner la ligne », hub, événement `phs16lc_scan`) ; `SceneButton` par fichier `scenes/*.json` (hub, nommé d'après le fichier, rechargé si le dossier change).
+- [x] `coordinator.async_apply_scene(scene_name, save=False)` : `apply_scene` du vendored `phs16ctl` en executor, `last_recipe` des cartes cibles mis à jour, refresh direct ; résultats `CardResult` par carte (une carte en erreur n'interrompt pas les autres).
+- [x] Événement `phs16lc_scene_applied` avec compte ok/erreurs + détail par carte.
+- [x] `const.scenes_dir_for()` : dossier `scenes/` = voisin du dossier `recipes_dir`.
+- [x] Tests : `@WP` envoyé + événement, save sur carte muette → erreur + événement, scène appliquée + événement + `last_recipe`, scène avec recette manquante → erreur par carte, scan découvrant un nouveau SPOT. **36 tests passed**.
 
 ### Phase 5 — `sensor`s
 - [ ] Températures CPU/LED1/LED2 (device_class temperature), courants (résumé + attribut), état de la ligne.
@@ -282,3 +286,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 1 | `coordinator.py` + `entity.py` + `binary_sensor.py` + setup/unload dans `__init__.py` ; 17 tests passed (FakePhsLink + pytest-homeassistant) | Contrat `_async_setup` 2026.11 (set `self.data`, retourne None) découvert via les tests et corrigé ; `async_io()` sérialise l'accès au port série |
 | 2026-11-11 | Phase 2 | `light.py` (ColorMode.BRIGHTNESS, mapping D10, D11) + commandes du coordinator ; 25 tests passed | Après une commande, refresh direct (`async_refresh`) au lieu du debouncer — sinon l'état restait à la valeur précédente dans les 10 s de cooldown |
 | 2026-11-11 | Phase 3 | `select.py` recette/groupe + événements + helper `add_spot_entities_listener` ; 31 tests passed | Options des selects mises en cache et rafraîchies à chaque update du coordinator (lecture disque en executor, jamais dans le event loop) |
+| 2026-11-11 | Phase 4 | `button.py` (save/scènes/scan) + `coordinator.async_apply_scene` ; 36 tests passed | Boutons scène au niveau du hub (device adaptateur) ; dossier scènes dérivé de `recipes_dir` (`scenes/` voisin) |

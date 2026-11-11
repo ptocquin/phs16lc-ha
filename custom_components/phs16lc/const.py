@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from homeassistant.const import CONF_PORT  # noqa: F401  (réexporté pour les autres modules)
 
 from .phs16ctl.protocol import CURRENT_MAX_MA, CURRENT_MIN_MA
@@ -23,6 +25,12 @@ DEFAULT_SCENES_DIR = "/config/phs16lc/scenes"
 EVENT_RECIPE_APPLIED = f"{DOMAIN}_recipe_applied"
 EVENT_SCENE_APPLIED = f"{DOMAIN}_scene_applied"
 EVENT_SAVED = f"{DOMAIN}_saved"
+EVENT_SCANNED = f"{DOMAIN}_scan"
+
+
+def scenes_dir_for(recipes_dir: str) -> Path:
+    """Dossier des scènes = dossier « scenes » à côté du dossier des recettes."""
+    return Path(recipes_dir).parent / "scenes"
 
 
 def brightness_to_ma(brightness: int) -> int:

@@ -18,8 +18,8 @@ from .const import DOMAIN
 from .coordinator import Phs16Coordinator
 from .phs16ctl.link import PhsLink
 
-# Peuplé au fur et à mesure des phases (button, sensor viennent ensuite)
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.LIGHT, Platform.SELECT]
+# Peuplé au fur et à mesure des phases (sensor vient ensuite)
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.LIGHT, Platform.SELECT, Platform.BUTTON]
 
 Phs16lcConfigEntry = ConfigEntry
 

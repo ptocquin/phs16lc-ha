@@ -29,6 +29,10 @@
     "select": {
       "recipe": { "name": "Recipe" },
       "group": { "name": "Group" }
+    },
+    "button": {
+      "save_nvm": { "name": "Save to NVM" },
+      "scan": { "name": "Scan the line" }
     }
   },
   "services": {
