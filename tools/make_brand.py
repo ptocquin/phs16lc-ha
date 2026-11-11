@@ -35,7 +35,12 @@ def write_png(path: Path, w: int, h: int, pixel_fn) -> None:
         )
 
     ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # RGBA 8 bits
-    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b"")
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+        + chunk(b"IEND", b"")
+    )
     path.write_bytes(png)
     print(f"{path.relative_to(ROOT)}  {w}x{h}  {len(png)} octets")
 

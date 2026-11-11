@@ -20,11 +20,15 @@ def test_vendored_modules_exist_and_match(root_dir: Path) -> None:
         src = _src(root_dir) / name
         dst = _dst(root_dir) / name
         assert dst.is_file(), f"{name} absent de la copie vendored (lancer tools/sync_phs16ctl.py)"
-        assert dst.read_bytes() == src.read_bytes(), f"{name} désynchronisé (lancer tools/sync_phs16ctl.py)"
+        assert dst.read_bytes() == src.read_bytes(), (
+            f"{name} désynchronisé (lancer tools/sync_phs16ctl.py)"
+        )
 
 
 def test_cli_not_vendored(root_dir: Path) -> None:
-    assert not (_dst(root_dir) / "cli.py").exists(), "cli.py ne doit pas être vendored (spécifique CLI)"
+    assert not (_dst(root_dir) / "cli.py").exists(), (
+        "cli.py ne doit pas être vendored (spécifique CLI)"
+    )
 
 
 def test_vendored_controller_importable_shape(root_dir: Path) -> None:

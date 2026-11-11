@@ -13,10 +13,11 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -30,6 +31,7 @@ from .const import (
     EVENT_SAVED,
     EVENT_SCANNED,
     EVENT_SCENE_APPLIED,
+    entry_value,
     scenes_dir_for,
 )
 from .phs16ctl.controller import (
@@ -96,7 +98,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             hass,
             _LOGGER,
             name=f"{DOMAIN}_{entry.entry_id}",
-            update_interval=timedelta(seconds=int(entry.data[CONF_POLL_INTERVAL])),
+            update_interval=timedelta(seconds=int(entry_value(entry, CONF_POLL_INTERVAL))),
         )
         self.entry = entry
         self.link = link
@@ -113,7 +115,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         Contrat HA 2026.11 : `_async_setup` ne retourne rien, il renseigne
         `self.data` lui-même (ensuite `_async_update_data` est appelé).
         """
-        expected = int(self.entry.data[CONF_EXPECTED_SPOTS])
+        expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
         addresses = await self.async_io(_rescan, self.link, expected)
         _LOGGER.info("Scan initial PHS16-LC : %d carte(s) : %s", len(addresses), addresses)
         self.data = Phs16Data(
@@ -127,7 +129,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def async_rescan(self) -> list[int]:
         """Rescan complet (bouton/service) : découvre les nouvelles cartes, marque les absentes."""
-        expected = int(self.entry.data[CONF_EXPECTED_SPOTS])
+        expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
         addresses = await self.async_io(_rescan, self.link, expected)
         for a in addresses:
             self.data.spots.setdefault(a, SpotState(address=a, online=True))
@@ -150,12 +152,14 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
 
-    async def async_apply_recipe(self, address: int, recipe_name: str, group: str | None = None) -> None:
+    async def async_apply_recipe(
+        self, address: int, recipe_name: str, group: str | None = None
+    ) -> None:
         """Applique une recette du dossier configuré à une carte (partielle si `group`).
 
         Tire l'événement `phs16lc_recipe_applied` (ok/erreur). Lève en cas d'échec.
         """
-        recipe_path = Path(str(self.entry.data[CONF_RECIPES_DIR])) / recipe_name
+        recipe_path = Path(str(entry_value(self.entry, CONF_RECIPES_DIR))) / recipe_name
 
         def _do() -> None:
             recipe = Recipe.from_file(recipe_path)
@@ -167,14 +171,21 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         except (LuminaireError, OSError, ValueError, KeyError) as exc:
             self.hass.bus.async_fire(
                 EVENT_RECIPE_APPLIED,
-                {"address": address, "recipe": recipe_name, "group": group, "ok": False, "error": str(exc)},
+                {
+                    "address": address,
+                    "recipe": recipe_name,
+                    "group": group,
+                    "ok": False,
+                    "error": str(exc),
+                },
             )
             raise
         spot = self.data.spots.get(address)
         if spot is not None and group is None:
             spot.last_recipe = recipe_name
         self.hass.bus.async_fire(
-            EVENT_RECIPE_APPLIED, {"address": address, "recipe": recipe_name, "group": group, "ok": True}
+            EVENT_RECIPE_APPLIED,
+            {"address": address, "recipe": recipe_name, "group": group, "ok": True},
         )
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
@@ -185,7 +196,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         try:
             await self.async_io(lum.save)
         except LuminaireError as exc:
-            self.hass.bus.async_fire(EVENT_SAVED, {"address": address, "ok": False, "error": str(exc)})
+            self.hass.bus.async_fire(
+                EVENT_SAVED, {"address": address, "ok": False, "error": str(exc)}
+            )
             raise
         self.hass.bus.async_fire(EVENT_SAVED, {"address": address, "ok": True})
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
@@ -193,7 +206,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def async_apply_scene(self, scene_name: str, save: bool = False) -> list[CardResult]:
         """Applique un fichier de scène (dossier `scenes/` à côté de `recipes_dir`)."""
-        scene_path = scenes_dir_for(str(self.entry.data[CONF_RECIPES_DIR])) / scene_name
+        scene_path = scenes_dir_for(str(entry_value(self.entry, CONF_RECIPES_DIR))) / scene_name
 
         def _do() -> tuple[Scene, list[CardResult]]:
             scene = Scene.from_file(scene_path)

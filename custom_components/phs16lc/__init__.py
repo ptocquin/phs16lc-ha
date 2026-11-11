@@ -46,7 +46,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)  # idempotent (plusieurs entrées = plusieurs bus)
+    # Options modifiées dans l'UI -> recharge l'entrée (nouvel intervalle de polling, etc.)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> bool:

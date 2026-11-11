@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_RECIPES_DIR, DOMAIN
+from .const import CONF_RECIPES_DIR, DOMAIN, entry_value
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_spot_entities_listener
 from .phs16ctl.controller import LuminaireError, Recipe
@@ -41,7 +41,7 @@ def recipe_groups(recipes_dir: Path, recipe_name: str | None) -> list[str]:
         return []
     try:
         return sorted(Recipe.from_file(recipes_dir / recipe_name).groups)
-    except (OSError, ValueError, KeyError):
+    except OSError, ValueError, KeyError:
         return []
 
 
@@ -51,13 +51,19 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: Phs16Coordinator = hass.data[DOMAIN][entry.entry_id]
-    recipes_dir = Path(str(entry.data[CONF_RECIPES_DIR]))
+    recipes_dir = Path(str(entry_value(entry, CONF_RECIPES_DIR)))
     add_spot_entities_listener(
-        hass, entry, coordinator, async_add_entities,
+        hass,
+        entry,
+        coordinator,
+        async_add_entities,
         lambda address: SpotRecipeSelect(coordinator, address, recipes_dir),
     )
     add_spot_entities_listener(
-        hass, entry, coordinator, async_add_entities,
+        hass,
+        entry,
+        coordinator,
+        async_add_entities,
         lambda address: SpotGroupSelect(coordinator, address, recipes_dir),
     )
 

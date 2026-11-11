@@ -19,7 +19,7 @@ class FakeSpot:
 class FakePhsLink:
     """Imite `PhsLink` : même constructeur (port, baudrate, trace), `send()`, `close()`."""
 
-    instances: list["FakePhsLink"] = []
+    instances: list[FakePhsLink] = []
     bus: dict[int, FakeSpot] = {}
 
     def __init__(self, port: str, baudrate: int = 115200, trace=None) -> None:
@@ -48,6 +48,8 @@ class FakePhsLink:
         if cmd == "GT":
             t = spot.temps
             return proto.Response.parse(f"#GT {t[0]} {t[1]} {t[2]}*00\r".encode())
+        if cmd == "GL":  # cartes LED : type1 sn1 type2 sn2
+            return proto.Response.parse(b"#GL 1 0x11 2 0x22*00\r")
         if cmd == "SP":
             spot.currents = [int(p) for p in params.split()]
             return proto.Response.parse(b"ACK*00\r")

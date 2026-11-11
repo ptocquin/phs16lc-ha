@@ -65,7 +65,7 @@ class SpotTemperatureSensor(Phs16Entity, SensorEntity):
 
 
 class SpotCurrentsSensor(Phs16Entity, SensorEntity):
-    """Résumé des courants du SPOT (« 800×8 + 0×8 ») + détail canal par canal en attributs."""
+    """Résumé des courants du SPOT (ex. « 800x8 + 0x8 ») + détail canal par canal en attributs."""
 
     _attr_icon = "mdi:flash"
     _attr_translation_key = "currents"

@@ -22,6 +22,19 @@
       "already_configured": "Ce port série est déjà configuré."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options PHS16-LC",
+        "description": "Modifié à chaud : l'entrée est rechargée automatiquement après sauvegarde.",
+        "data": {
+          "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence)",
+          "poll_interval": "Intervalle de rafraîchissement (secondes, 5-60)",
+          "recipes_dir": "Dossier des recettes lumineuses (JSON)"
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "spot_online": { "name": "En ligne" }

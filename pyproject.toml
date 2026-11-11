@@ -18,3 +18,13 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100  # même style que HA core et que phs16ctl/
+# La copie vendored de phs16ctl est exclue du lint : elle doit rester
+# byte-identique à ../phs16ctl (vérifié par tests/test_sync.py).
+extend-exclude = ["custom_components/phs16lc/phs16ctl"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "RUF", "PYI"]
+ignore = ["RUF012"]  # _attr_* mutables : pattern standard des entités HA (ClassVar implicite)

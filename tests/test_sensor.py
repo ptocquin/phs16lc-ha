@@ -14,7 +14,13 @@ from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
 
 
-async def _setup(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, bus: dict[int, FakeSpot], tmp_path, expected: int = 2):
+async def _setup(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    bus: dict[int, FakeSpot],
+    tmp_path,
+    expected: int = 2,
+):
     FakePhsLink.reset(bus)
     monkeypatch.setattr("custom_components.phs16lc.PhsLink", FakePhsLink)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -54,7 +60,7 @@ async def test_currents_sensor_summary_and_channels_attribute(hass, monkeypatch,
     entry, _ = await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
 
     state = hass.states.get(_sensor_id(hass, entry, "spot_1_currents"))
-    assert state.state == "800×8 + 0×8"
+    assert state.state == "800×8 + 0×8"  # noqa: RUF001  (format réel de format_currents, vendored)
     assert state.attributes["channels"] == [800] * 8 + [0] * 8
 
 

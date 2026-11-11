@@ -11,7 +11,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.phs16lc.const import DOMAIN, EVENT_SAVED, EVENT_SCANNED, EVENT_SCENE_APPLIED
+from custom_components.phs16lc.const import (
+    DOMAIN,
+    EVENT_SAVED,
+    EVENT_SCANNED,
+    EVENT_SCENE_APPLIED,
+)
 
 from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
@@ -20,7 +25,13 @@ CROISSANCE = {"name": "croissance", "channels": [800] * 8 + [0] * 8}
 SERRE = {"name": "serre", "targets": [{"address": 1, "recipe": "croissance.json"}]}
 
 
-async def _setup(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, bus: dict[int, FakeSpot], tmp_path, expected: int = 1):
+async def _setup(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    bus: dict[int, FakeSpot],
+    tmp_path,
+    expected: int = 1,
+):
     recipes = tmp_path / "recipes"
     scenes = tmp_path / "scenes"
     recipes.mkdir()
@@ -93,7 +104,9 @@ async def test_scene_button_applies_scene_and_fires_event(hass, monkeypatch, tmp
     assert events[-1]["results"][0]["address"] == 1
 
 
-async def test_scene_with_missing_recipe_reports_error_per_card(hass, monkeypatch, tmp_path) -> None:
+async def test_scene_with_missing_recipe_reports_error_per_card(
+    hass, monkeypatch, tmp_path
+) -> None:
     bus = {1: FakeSpot()}
     entry, _ = await _setup(hass, monkeypatch, bus, tmp_path)
     # scène qui référence une recette inexistante

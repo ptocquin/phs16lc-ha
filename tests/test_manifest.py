@@ -14,8 +14,22 @@ import json
 import struct
 from pathlib import Path
 
-REQUIRED_MANIFEST_KEYS = {"domain", "name", "version", "documentation", "issue_tracker", "codeowners"}
-VALID_IOT_CLASSES = {"assumed_state", "calculated", "cloud_polling", "cloud_push", "local_polling", "local_push"}
+REQUIRED_MANIFEST_KEYS = {
+    "domain",
+    "name",
+    "version",
+    "documentation",
+    "issue_tracker",
+    "codeowners",
+}
+VALID_IOT_CLASSES = {
+    "assumed_state",
+    "calculated",
+    "cloud_polling",
+    "cloud_push",
+    "local_polling",
+    "local_push",
+}
 
 
 def _load(path: Path) -> dict:
@@ -25,7 +39,9 @@ def _load(path: Path) -> dict:
 def test_manifest_required_keys(root_dir: Path) -> None:
     manifest = _load(root_dir / "custom_components" / "phs16lc" / "manifest.json")
     assert manifest["domain"] == "phs16lc"
-    assert REQUIRED_MANIFEST_KEYS <= set(manifest), f"clés manquantes: {REQUIRED_MANIFEST_KEYS - set(manifest)}"
+    assert REQUIRED_MANIFEST_KEYS <= set(manifest), (
+        f"clés manquantes: {REQUIRED_MANIFEST_KEYS - set(manifest)}"
+    )
 
 
 def test_manifest_no_homeassistant_key(root_dir: Path) -> None:
@@ -41,7 +57,9 @@ def test_manifest_shape(root_dir: Path) -> None:
     assert manifest["iot_class"] in VALID_IOT_CLASSES
     assert manifest["requirements"] == ["pyserial==3.5"]  # pin identique à HA core 2026.11
     usb = manifest["usb"]
-    assert any(u["vid"] == "0403" and u["pid"] == "6001" for u in usb), "matcher USB FTDI 0403:6001 attendu"
+    assert any(u["vid"] == "0403" and u["pid"] == "6001" for u in usb), (
+        "matcher USB FTDI 0403:6001 attendu"
+    )
     assert manifest["version"].count(".") == 2
 
 
@@ -66,7 +84,10 @@ def test_translations_parse(root_dir: Path) -> None:
     strings = _load(integ / "strings.json")
     for lang in ("en", "fr"):
         tr = _load(integ / "translations" / f"{lang}.json")
-        assert tr["config"]["step"]["user"]["data"].keys() == strings["config"]["step"]["user"]["data"].keys()
+        assert (
+            tr["config"]["step"]["user"]["data"].keys()
+            == strings["config"]["step"]["user"]["data"].keys()
+        )
         assert tr["services"].keys() == strings["services"].keys()
 
 

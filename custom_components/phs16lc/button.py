@@ -12,7 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_RECIPES_DIR, DOMAIN, scenes_dir_for
+from .const import CONF_RECIPES_DIR, DOMAIN, entry_value, scenes_dir_for
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_spot_entities_listener, hub_device_info
 from .phs16ctl.controller import LuminaireError
@@ -34,11 +34,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: Phs16Coordinator = hass.data[DOMAIN][entry.entry_id]
-    scenes_dir = scenes_dir_for(str(entry.data[CONF_RECIPES_DIR]))
+    scenes_dir = scenes_dir_for(str(entry_value(entry, CONF_RECIPES_DIR)))
 
     # Bouton par SPOT : sauvegarder NVM
     add_spot_entities_listener(
-        hass, entry, coordinator, async_add_entities,
+        hass,
+        entry,
+        coordinator,
+        async_add_entities,
         lambda address: SpotSaveButton(coordinator, address),
     )
 
@@ -48,11 +51,7 @@ async def async_setup_entry(
 
     async def _async_add_scene_buttons() -> None:
         scenes = await hass.async_add_executor_job(list_scene_files, scenes_dir)
-        new = [
-            SceneButton(coordinator, entry, name)
-            for name in scenes
-            if name not in known_scenes
-        ]
+        new = [SceneButton(coordinator, entry, name) for name in scenes if name not in known_scenes]
         known_scenes.update(scenes)
         if new:
             async_add_entities(new)

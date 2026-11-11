@@ -24,7 +24,7 @@ def _coordinators(hass: HomeAssistant) -> list[Phs16Coordinator]:
 
 
 def _addresses(raw: object, coordinator: Phs16Coordinator) -> list[int]:
-    """"1" -> [1] ; "all" -> toutes les adresses connues ; sinon ServiceValidationError."""
+    """ "1" -> [1] ; "all" -> toutes les adresses connues ; sinon ServiceValidationError."""
     text = str(raw).strip()
     if text.lower() == "all":
         return sorted(coordinator.data.spots)
@@ -33,8 +33,9 @@ def _addresses(raw: object, coordinator: Phs16Coordinator) -> list[int]:
     except ValueError:
         raise ServiceValidationError(f"address invalide : {raw!r} (entier ou 'all')") from None
     if address not in coordinator.data.spots:
+        port = coordinator.entry.data.get("port")
         raise ServiceValidationError(
-            f"SPOT {address} inconnu sur {coordinator.entry.data.get('port')} — faites d'abord phs16lc.scan"
+            f"SPOT {address} inconnu sur {port} — faites d'abord phs16lc.scan"
         )
     return [address]
 
@@ -44,7 +45,7 @@ def _parse_currents(raw: object) -> list[int]:
     values = list(raw) if isinstance(raw, (list, tuple)) else str(raw).replace(",", " ").split()
     try:
         currents = [int(v) for v in values]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise ServiceValidationError(f"currents invalides : {raw!r} (liste d'entiers mA)") from None
     if not currents:
         raise ServiceValidationError("currents vide")
@@ -92,8 +93,9 @@ async def _handle_set_channels(call: ServiceCall) -> None:
         for address in _addresses(call.data["address"], coordinator):
             spot = coordinator.data.spots[address]
             if spot.currents and len(currents) != len(spot.currents):
+                n_card = len(spot.currents)
                 raise ServiceValidationError(
-                    f"SPOT {address} a {len(spot.currents)} canaux, {len(currents)} valeurs fournies"
+                    f"SPOT {address} a {n_card} canaux, {len(currents)} valeurs fournies"
                 )
             try:
                 await coordinator.async_set_channels(address, currents)

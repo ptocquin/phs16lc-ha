@@ -58,7 +58,9 @@ async def test_duplicate_port_aborts(hass: HomeAssistant, monkeypatch: pytest.Mo
     FakePhsLink.reset({1: FakeSpot()})
     monkeypatch.setattr("custom_components.phs16lc.PhsLink", FakePhsLink)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
-    await hass.config_entries.flow.async_configure(result["flow_id"], {**FLOW_DATA, "expected_spots": 1})
+    await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**FLOW_DATA, "expected_spots": 1}
+    )
     await hass.async_block_till_done()
 
     result2 = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})

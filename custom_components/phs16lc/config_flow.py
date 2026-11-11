@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_PORT
+from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
@@ -73,3 +73,35 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry) -> Phs16lcOptionsFlow:
+        return Phs16lcOptionsFlow()
+
+
+class Phs16lcOptionsFlow(OptionsFlow):
+    """Modifie expected_spots / poll_interval / recipes_dir sans recréer l'entrée.
+
+    La sauvegarde déclenche le update listener enregistré dans __init__.py,
+    qui recharge l'entrée (nouveau coordinator avec le nouvel intervalle).
+    """
+
+    async def async_step_init(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        current = {**self.config_entry.data, **self.config_entry.options}
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_EXPECTED_SPOTS, default=int(current[CONF_EXPECTED_SPOTS])
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1_000_000)),
+                vol.Required(CONF_POLL_INTERVAL, default=int(current[CONF_POLL_INTERVAL])): vol.All(
+                    vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)
+                ),
+                vol.Required(CONF_RECIPES_DIR, default=str(current[CONF_RECIPES_DIR])): str,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

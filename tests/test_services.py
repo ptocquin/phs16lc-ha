@@ -15,10 +15,22 @@ from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
 
 CROISSANCE = {"name": "croissance", "channels": [800] * 8 + [0] * 8}
-SERRE = {"name": "serre", "targets": [{"address": 1, "recipe": "croissance.json"}, {"address": 2, "recipe": "croissance.json"}]}
+SERRE = {
+    "name": "serre",
+    "targets": [
+        {"address": 1, "recipe": "croissance.json"},
+        {"address": 2, "recipe": "croissance.json"},
+    ],
+}
 
 
-async def _setup(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, bus: dict[int, FakeSpot], tmp_path, expected: int = 2):
+async def _setup(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    bus: dict[int, FakeSpot],
+    tmp_path,
+    expected: int = 2,
+):
     recipes = tmp_path / "recipes"
     scenes = tmp_path / "scenes"
     recipes.mkdir(exist_ok=True)
@@ -105,12 +117,16 @@ async def test_set_channels_service_string_and_count_check(hass, monkeypatch, tm
     bus = {1: FakeSpot(currents=[0] * 16)}
     _, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
 
-    await _call(hass, "set_channels", {"address": "1", "currents": "800 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0"})
+    await _call(
+        hass, "set_channels", {"address": "1", "currents": "800 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0"}
+    )
     assert coord.data.spots[1].currents == [800, 800] + [0] * 14
 
     # mauvais nombre de canaux (carte 16 canaux, 8 fournis) -> erreur de validation
     with pytest.raises(HomeAssistantError):
-        await _call(hass, "set_channels", {"address": "1", "currents": "800 800 800 800 800 800 800 800"})
+        await _call(
+            hass, "set_channels", {"address": "1", "currents": "800 800 800 800 800 800 800 800"}
+        )
 
     # la liste JSON fonctionne aussi
     await _call(hass, "set_channels", {"address": "1", "currents": [1000] * 16})

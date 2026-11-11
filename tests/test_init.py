@@ -13,7 +13,12 @@ from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
 
 
-async def _setup(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, bus: dict[int, FakeSpot], expected: int = 2):
+async def _setup(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    bus: dict[int, FakeSpot],
+    expected: int = 2,
+):
     FakePhsLink.reset(bus)
     monkeypatch.setattr("custom_components.phs16lc.PhsLink", FakePhsLink)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -36,7 +41,9 @@ def _entity_id(hass: HomeAssistant, entry, address: int, key: str) -> str:
     return entity_id
 
 
-async def test_polling_marks_dead_spot_offline(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_polling_marks_dead_spot_offline(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bus = {1: FakeSpot(), 2: FakeSpot()}
     entry, coordinator = await _setup(hass, monkeypatch, bus)
 
@@ -50,9 +57,11 @@ async def test_polling_marks_dead_spot_offline(hass: HomeAssistant, monkeypatch:
     assert hass.states.get(_entity_id(hass, entry, 1, "online")).state == "on"
 
 
-async def test_rescan_discovers_new_spots(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_rescan_discovers_new_spots(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bus = {1: FakeSpot()}
-    entry, coordinator = await _setup(hass, monkeypatch, bus, expected=3)
+    _entry, coordinator = await _setup(hass, monkeypatch, bus, expected=3)
     assert set(coordinator.data.spots) == {1}
     assert len(hass.states.async_all("binary_sensor")) == 1
 
@@ -66,7 +75,9 @@ async def test_rescan_discovers_new_spots(hass: HomeAssistant, monkeypatch: pyte
     assert len(hass.states.async_all("binary_sensor")) == 3
 
 
-async def test_unload_closes_serial_port(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unload_closes_serial_port(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bus = {1: FakeSpot()}
     entry, _ = await _setup(hass, monkeypatch, bus, expected=1)
     link = FakePhsLink.instances[0]
@@ -80,7 +91,9 @@ async def test_unload_closes_serial_port(hass: HomeAssistant, monkeypatch: pytes
     assert entry.entry_id not in hass.data[DOMAIN]
 
 
-async def test_setup_retries_when_port_unavailable(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_setup_retries_when_port_unavailable(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class BrokenLink:
         def __init__(self, port, *a, **kw):
             raise OSError(19, "Device not configured")

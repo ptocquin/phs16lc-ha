@@ -47,12 +47,16 @@ def _light_id(hass: HomeAssistant, entry, address: int) -> str:
 
 
 async def _turn_on(hass, entity_id, **kwargs):
-    await hass.services.async_call(LIGHT_DOMAIN, "turn_on", {"entity_id": entity_id, **kwargs}, blocking=True)
+    await hass.services.async_call(
+        LIGHT_DOMAIN, "turn_on", {"entity_id": entity_id, **kwargs}, blocking=True
+    )
     await hass.async_block_till_done()
 
 
 async def _turn_off(hass, entity_id):
-    await hass.services.async_call(LIGHT_DOMAIN, "turn_off", {"entity_id": entity_id}, blocking=True)
+    await hass.services.async_call(
+        LIGHT_DOMAIN, "turn_off", {"entity_id": entity_id}, blocking=True
+    )
     await hass.async_block_till_done()
 
 
@@ -69,7 +73,9 @@ def test_brightness_ma_mapping() -> None:
     assert ma_to_brightness(2150) == 255
     # aller-retour cohérent à ±1 près
     for b in (1, 50, 128, 200, 255):
-        assert abs(brightness_to_ma(ma_to_brightness(brightness_to_ma(b))) - brightness_to_ma(b)) <= 9
+        assert (
+            abs(brightness_to_ma(ma_to_brightness(brightness_to_ma(b))) - brightness_to_ma(b)) <= 9
+        )
 
 
 # ----------------------------------------------------------------------
@@ -123,7 +129,9 @@ async def test_turn_on_without_brightness_uses_default_ma(hass, monkeypatch, tmp
     assert hass.states.get(lid).state == "on"
 
 
-async def test_turn_on_without_brightness_reapplies_last_recipe(hass, monkeypatch, tmp_path) -> None:
+async def test_turn_on_without_brightness_reapplies_last_recipe(
+    hass, monkeypatch, tmp_path
+) -> None:
     (tmp_path / "croissance.json").write_text(
         json.dumps({"name": "croissance", "channels": [800] * 8 + [0] * 8}), encoding="utf-8"
     )

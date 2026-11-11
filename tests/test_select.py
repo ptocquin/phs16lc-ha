@@ -26,7 +26,9 @@ SPECTRE = {
 CROISSANCE = {"name": "croissance", "channels": [800] * 8 + [0] * 8}
 
 
-async def _setup(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, bus: dict[int, FakeSpot], tmp_path):
+async def _setup(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, bus: dict[int, FakeSpot], tmp_path
+):
     (tmp_path / "spectre.json").write_text(json.dumps(SPECTRE), encoding="utf-8")
     (tmp_path / "croissance.json").write_text(json.dumps(CROISSANCE), encoding="utf-8")
     FakePhsLink.reset(bus)
@@ -64,7 +66,9 @@ async def test_recipe_select_lists_recipe_files(hass, monkeypatch, tmp_path) -> 
     assert state.state == "unknown"  # aucune recette sélectionnée
 
 
-async def test_select_recipe_applies_full_recipe_and_fires_event(hass, monkeypatch, tmp_path) -> None:
+async def test_select_recipe_applies_full_recipe_and_fires_event(
+    hass, monkeypatch, tmp_path
+) -> None:
     bus = {1: FakeSpot(currents=[0] * 16)}
     entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
 

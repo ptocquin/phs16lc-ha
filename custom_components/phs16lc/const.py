@@ -33,6 +33,11 @@ def scenes_dir_for(recipes_dir: str) -> Path:
     return Path(recipes_dir).parent / "scenes"
 
 
+def entry_value(entry, key: str):
+    """Valeur de configuration effective : `options` (modifié via l'UI) prioritaire sur `data`."""
+    return entry.options.get(key, entry.data.get(key))
+
+
 def brightness_to_ma(brightness: int) -> int:
     """Luminosité HA 1..255 → courant 74..2150 mA (linéaire) ; 0 → 0 (éteint)."""
     if brightness <= 0:

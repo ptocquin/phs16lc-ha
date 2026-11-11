@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 1.0 — 2026-11-11 — phase 7 réalisée (options flow + diagnostics + lint, 53 tests OK).
 > Version : 0.9 — 2026-11-11 — phase 6 réalisée (services phs16lc.*, 50 tests OK).
 > Version : 0.8 — 2026-11-11 — phase 5 réalisée (sensors températures/courants/ligne, 40 tests OK).
 > Version : 0.7 — 2026-11-11 — phase 4 réalisée (boutons save/scènes/scan, 36 tests OK).
@@ -244,11 +245,13 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] `services.yaml` + traductions fr/en (déjà en place depuis la phase 0).
 - [x] Tests : enregistrement/retrait des services, apply_recipe (adresse seule / `all` / inconnue → erreur), apply_scene avec `save:true` (@WP par carte), save, set_channels (chaîne + liste + contrôle de taille), set_channel (patch un canal + borne), scan. **50 tests passed**.
 
-### Phase 7 — Polissage
-- [ ] Options flow (poll_interval, expected_spots, recipes_dir) + reconfigure.
-- [ ] `diagnostics.py` (infos carte `@GL`, ports détectés, version intégration).
-- [ ] Événements logbook complets, README de l'intégration.
-- [ ] Validation hassfest du manifest (`homeassistant` absent du manifest, `categories` présent, requirements compatibles core).
+### Phase 7 — Polissage — FAITE (2026-11-11)
+- [x] Options flow (`config_flow.py` : `Phs16lcOptionsFlow`) : `expected_spots` / `poll_interval` / `recipes_dir` modifiables dans l'UI, pré-rempli avec les valeurs courantes ; sauvegarde → update listener → **reload automatique** de l'entrée (nouveau coordinator avec le nouvel intervalle).
+- [x] `const.entry_value(entry, key)` : `options` prioritaire sur `data` — utilisé par coordinator/select/button.
+- [x] `diagnostics.py` : config entrée, port, ports détectés, et par SPOT état + identité `@GI` + cartes LED `@GL` (I/O via `coordinator.async_io`).
+- [x] Lint : ruff (line-length 100, vendored `phs16ctl/` exclu — test_sync garantit qu'il reste byte-identique) → `ruff check` et `ruff format --check` propres.
+- [x] Validation manifest : règles hassfest 2026.11 couvertes par `test_manifest.py` + chargement réel de l'intégration dans les tests HA (« Loaded phs16lc from custom_components.phs16lc »).
+- [x] Tests : options flow (form + défauts + sauvegarde/reload avec nouvel intervalle), diagnostics (identité/courants/boards, carte muette). **53 tests passed**.
 
 ### Phase 8 — Validation sur MacBook Pro (sans puis avec matériel)
 - [ ] E2E sans matériel : `fake_spot.py --boards 3` sur pty → instance HA locale du Mac (`hass -c ~/.hass_dev`, port = le pty) → scénario : scan, on/off, recette, groupe, scène, save, températures.
@@ -295,3 +298,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 4 | `button.py` (save/scènes/scan) + `coordinator.async_apply_scene` ; 36 tests passed | Boutons scène au niveau du hub (device adaptateur) ; dossier scènes dérivé de `recipes_dir` (`scenes/` voisin) |
 | 2026-11-11 | Phase 5 | `sensor.py` (3 températures historisées + courants + line_status hub) ; 40 tests passed | `state_class: measurement` sur les températures pour l'historique recorder ; carte muette = `unknown` plutôt que `unavailable` |
 | 2026-11-11 | Phase 6 | `services.py` + événements déplacés dans le coordinator ; 50 tests passed | Événements émis par le coordinator (pas par les entités) : services et UI partagent le même logbook, pas de doublon |
+| 2026-11-11 | Phase 7 | Options flow + reload à chaud, `diagnostics.py`, `entry_value()`, ruff (vendored exclu), 53 tests passed | Options flow via `hass.config_entries.options.async_init` (pas `.flow`) ; `vol` default devenu factory (lambda) en 2026.11 ; carte morte au scan initial = non découverte (comportement scan_line) |

@@ -22,6 +22,19 @@
       "already_configured": "This serial port is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PHS16-LC options",
+        "description": "Applied live: the entry is reloaded automatically after saving.",
+        "data": {
+          "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence)",
+          "poll_interval": "Polling interval (seconds, 5-60)",
+          "recipes_dir": "Recipe folder (JSON)"
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "spot_online": { "name": "Online" }
