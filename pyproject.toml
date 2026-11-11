@@ -1,0 +1,20 @@
+[project]
+name = "ha-phs16lc"
+version = "0.1.0"
+description = "Intégration Home Assistant pour les luminaires PHS16-LC (dossier ha-integration/)"
+requires-python = ">=3.14.2"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "homeassistant==2026.11.*",
+    "pytest-homeassistant==2026.11.*",
+    "pytest>=8",
+    "pytest-asyncio>=0.26",
+    "pyserial==3.5",
+    "ruff>=0.14",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

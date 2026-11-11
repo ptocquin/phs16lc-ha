@@ -1,0 +1,72 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PHS16-LC",
+        "description": "Bus RS-485 full duplex des luminaires PHS16-LC. Branchez l'adaptateur USB-RS422 (FTDI) avant de continuer.",
+        "data": {
+          "port": "Port série",
+          "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence)",
+          "poll_interval": "Intervalle de rafraîchissement (secondes, 5-60)",
+          "recipes_dir": "Dossier des recettes lumineuses (JSON)"
+        },
+        "data_description": {
+          "port": "Linux : /dev/ttyUSB0 (ou /dev/phs16bus avec règle udev). macOS (dev) : /dev/cu.usbserial-XXXX.",
+          "expected_spots": "Indiquez le nombre total de luminaires pour détecter une carte HS au milieu de la ligne.",
+          "poll_interval": "Le protocole PHS16-LC ne pousse pas d'état : les courants et températures sont relus à cet intervalle.",
+          "recipes_dir": "Copiez-y les fichiers recipes/*.json du projet ; ils alimentent les listes déroulantes « Recette »."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Ce port série est déjà configuré."
+    }
+  },
+  "services": {
+    "scan": {
+      "name": "Scanner la ligne",
+      "description": "Recherche les cartes PHS16-LC présentes sur le bus (adresses 1..N)."
+    },
+    "apply_recipe": {
+      "name": "Appliquer une recette",
+      "description": "Applique une recette lumineuse à une carte (ou à toutes avec address=all).",
+      "fields": {
+        "address": { "name": "Adresse", "description": "Numéro de carte (ex: \"1\") ou \"all\"." },
+        "recipe": { "name": "Recette", "description": "Nom du fichier JSON (ex: \"croissance.json\")." },
+        "group": { "name": "Groupe", "description": "Optionnel : applique seulement ce groupe de canaux (application partielle)." }
+      }
+    },
+    "apply_scene": {
+      "name": "Appliquer une scène",
+      "description": "Applique un fichier de scène à plusieurs cartes en une fois.",
+      "fields": {
+        "file": { "name": "Fichier de scène", "description": "Nom du fichier dans le dossier des scènes (ex: \"serre.json\")." },
+        "save": { "name": "Sauvegarder en NVM", "description": "Envoie @WP après chaque carte (rend les courants permanents)." }
+      }
+    },
+    "save": {
+      "name": "Sauvegarder en NVM",
+      "description": "Rend les courants actuels de la carte permanents en mémoire non volatile (@WP).",
+      "fields": {
+        "address": { "name": "Adresse", "description": "Numéro de carte (ex: \"1\")." }
+      }
+    },
+    "set_channels": {
+      "name": "Régler les canaux",
+      "description": "Règle chaque canal individuellement (16 valeurs en mA, 0 = éteint, 74-2150 mA).",
+      "fields": {
+        "address": { "name": "Adresse", "description": "Numéro de carte." },
+        "currents": { "name": "Courants (mA)", "description": "16 valeurs séparées par des espaces ou virgules (ex: \"800 800 0 0 ...\")." }
+      }
+    },
+    "set_channel": {
+      "name": "Régler un canal",
+      "description": "Règle un seul canal d'une carte.",
+      "fields": {
+        "address": { "name": "Adresse", "description": "Numéro de carte." },
+        "channel": { "name": "Canal", "description": "Numéro du canal (1-16)." },
+        "ma": { "name": "Courant (mA)", "description": "0 = éteint, 74-2150 mA." }
+      }
+    }
+  }
+}

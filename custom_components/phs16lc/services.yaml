@@ -1,0 +1,73 @@
+# Services exposés par l'intégration PHS16-LC (handlers enregistrés en phase 6).
+# `address` accepte un numéro de carte ("1") ou "all" (toutes les cartes scannées).
+
+scan:
+  fields: {}
+
+apply_recipe:
+  fields:
+    address:
+      required: true
+      selector:
+        text:
+    recipe:
+      required: true
+      selector:
+        text:
+    group:
+      required: false
+      selector:
+        text:
+
+apply_scene:
+  fields:
+    file:
+      required: true
+      selector:
+        text:
+    save:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+save:
+  fields:
+    address:
+      required: true
+      selector:
+        text:
+
+set_channels:
+  fields:
+    address:
+      required: true
+      selector:
+        text:
+    currents:
+      required: true
+      selector:
+        text:
+
+set_channel:
+  fields:
+    address:
+      required: true
+      selector:
+        text:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+          mode: box
+    ma:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 2150
+          step: 1
+          mode: box

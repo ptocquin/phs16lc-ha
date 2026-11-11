@@ -1,0 +1,20 @@
+{
+  "domain": "phs16lc",
+  "name": "PHS16-LC",
+  "categories": ["lighting.lighting_systems"],
+  "codeowners": ["@ptocquin"],
+  "config_flow": true,
+  "documentation": "https://gitlab.uliege.be/ptocquin/phs16lc/-/tree/develop/ha-integration",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://gitlab.uliege.be/ptocquin/phs16lc/-/issues",
+  "requirements": ["pyserial==3.5"],
+  "usb": [
+    {
+      "vid": "0403",
+      "pid": "6001",
+      "description": "FTDI USB-RS422-WE (adaptateur RS-485 full duplex 4 fils pour bus PHS16-LC)"
+    }
+  ],
+  "version": "0.1.0"
+}
