@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.4 — 2026-11-11 — phase 1 réalisée (coordinator + présence, 17 tests OK).
 > Version : 0.3 — 2026-11-11 — phase 0 réalisée (squelette + vendored phs16ctl + tests OK).
 > Version : 0.2 — 2026-11-11 — ajout de la boucle de développement/test sur
 > MacBook Pro (macOS 26.6) et de la procédure de déploiement sur PC Linux.
@@ -198,12 +199,13 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] `services.yaml` (6 services) + `strings.json` + `translations/en.json` + `fr.json` + `README.md` + `pyproject.toml` (dev: `homeassistant==2026.11.*`, `pytest-homeassistant==2026.11.*`).
 - [x] Tests phase 0 (10 tests, sans runtime HA) : manifest/hacs/brand/translations/services + synchro vendored — **10 passed** (`uv run --no-project --with pytest --with pyyaml --python 3.14 pytest tests/`).
 
-### Phase 1 — Hub + coordinator
-- [ ] `__init__.py` : setup de l'entry, ouverture `PhsLink` (executor), enregistrement du coordinator.
-- [ ] `coordinator.py` : scan initial (`scan_line` avec `expected_spots`), polling `@GP` + `@GT` par carte connue, toutes les `poll_interval` secondes.
-- [ ] Registre de devices : hub « Adaptateur PHS16-LC » + device par SPOT (`via_device`).
-- [ ] `binary_sensor` de présence par SPOT.
-- [ ] Tests unitaires (FakeLink) : scan, polling, carte muette.
+### Phase 1 — Hub + coordinator — FAITE (2026-11-11)
+- [x] `__init__.py` : ouverture `PhsLink` en executor (`ConfigEntryNotReady` si port indisponible → retry auto), coordinator + `async_config_entry_first_refresh`, unload ferme le port.
+- [x] `coordinator.py` : scan initial (`scan_line` + `expected_spots`), polling `@GI`/`@GP`/`@GT` toutes les `poll_interval` s, `async_rescan()`, `async_io()` (lock asyncio + executor : un seul thread sur le port, D7/D8).
+- [x] Registre de devices (`entity.py`) : hub « PHS16-LC <port> » + device « SPOT n » en `via_device`.
+- [x] `binary_sensor` de présence par SPOT, ajout dynamique à chaque rescan.
+- [x] Tests (FakePhsLink, fixtures `pytest-homeassistant`) : flow, setup+scan, doublon de port, carte muette au polling, rescan avec nouvelle carte, unload ferme le port, port indisponible → SETUP_RETRY. **17 tests passed**.
+- [x] Note : contrat `DataUpdateCoordinator._async_setup` changé en HA 2026.11 (retourne `None`, renseigne `self.data`) — corrigé et couvert par les tests.
 
 ### Phase 2 — Entité `light`
 - [ ] `light.py` : état on/off + brightness (mapping D10), `turn_on`/`turn_off` (D11), `supported_color_modes = {ColorMode.BRIGHTNESS}`.
@@ -271,3 +273,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | D1–D16 | Cadrage initial | Lancement du développement |
 | 2026-11-11 | D16–D18 | Ajout dev local MacBook Pro + déploiement Linux sans changement de code ; harnais de test = `pytest-homeassistant` (package central 2026.11) | Développement/test sur ce Mac (macOS 26.6, FTDI VCP à valider, port `/dev/cu.usbserial-XXXX`), puis déploiement sur PC Linux (`/dev/ttyUSB0`) avec le même code |
 | 2026-11-11 | Phase 0 | Squelette créé : manifest/hacs.json/brand/config_flow/services/strings+translations, `sync_phs16ctl.py` + copie vendored (5 modules), pyproject, 10 tests OK | Démarrage de l'implémentation ; pin pyserial==3.5 = pin HA core 2026.11 (vérifié dans `package_constraints.txt`) ; catégorie `lighting.lighting_systems` (catégories 2026.11 hiérarchiques) |
+| 2026-11-11 | Phase 1 | `coordinator.py` + `entity.py` + `binary_sensor.py` + setup/unload dans `__init__.py` ; 17 tests passed (FakePhsLink + pytest-homeassistant) | Contrat `_async_setup` 2026.11 (set `self.data`, retourne None) découvert via les tests et corrigé ; `async_io()` sérialise l'accès au port série |

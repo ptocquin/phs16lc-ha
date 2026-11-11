@@ -22,6 +22,11 @@
       "already_configured": "Ce port série est déjà configuré."
     }
   },
+  "entity": {
+    "binary_sensor": {
+      "spot_online": { "name": "En ligne" }
+    }
+  },
   "services": {
     "scan": {
       "name": "Scanner la ligne",

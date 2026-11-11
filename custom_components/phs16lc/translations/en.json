@@ -22,6 +22,11 @@
       "already_configured": "This serial port is already configured."
     }
   },
+  "entity": {
+    "binary_sensor": {
+      "spot_online": { "name": "Online" }
+    }
+  },
   "services": {
     "scan": {
       "name": "Scan the line",
