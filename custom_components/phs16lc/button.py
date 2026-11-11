@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 
 from homeassistant.components.button import ButtonEntity
@@ -13,14 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    CONF_RECIPES_DIR,
-    DOMAIN,
-    EVENT_SAVED,
-    EVENT_SCANNED,
-    EVENT_SCENE_APPLIED,
-    scenes_dir_for,
-)
+from .const import CONF_RECIPES_DIR, DOMAIN, scenes_dir_for
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_spot_entities_listener, hub_device_info
 from .phs16ctl.controller import LuminaireError
@@ -100,8 +92,8 @@ class ScanButton(HubButton):
         super().__init__(coordinator, entry, entity_key="scan", translation_key="scan")
 
     async def async_press(self) -> None:
-        found = await self.coordinator.async_rescan()
-        self.hass.bus.async_fire(EVENT_SCANNED, {"addresses": found, "count": len(found)})
+        # le coordinator tire l'événement phs16lc_scan
+        await self.coordinator.async_rescan()
 
 
 class SceneButton(HubButton):
@@ -114,18 +106,10 @@ class SceneButton(HubButton):
 
     async def async_press(self) -> None:
         try:
-            results = await self.coordinator.async_apply_scene(self._scene_name)
+            # le coordinator tire l'événement phs16lc_scene_applied
+            await self.coordinator.async_apply_scene(self._scene_name)
         except (OSError, ValueError, KeyError, LuminaireError) as exc:
             raise HomeAssistantError(f"Scène {self._scene_name!r} illisible : {exc}") from exc
-        self.hass.bus.async_fire(
-            EVENT_SCENE_APPLIED,
-            {
-                "scene": self._scene_name,
-                "ok": sum(1 for r in results if r.ok),
-                "errors": sum(1 for r in results if not r.ok),
-                "results": [asdict(r) for r in results],
-            },
-        )
 
 
 class SpotSaveButton(Phs16Entity, ButtonEntity):
@@ -138,10 +122,7 @@ class SpotSaveButton(Phs16Entity, ButtonEntity):
 
     async def async_press(self) -> None:
         try:
+            # le coordinator tire l'événement phs16lc_saved (ok/erreur)
             await self.coordinator.async_save(self.address)
         except LuminaireError as exc:
-            self.hass.bus.async_fire(
-                EVENT_SAVED, {"address": self.address, "ok": False, "error": str(exc)}
-            )
             raise HomeAssistantError(f"SPOT {self.address} : {exc}") from exc
-        self.hass.bus.async_fire(EVENT_SAVED, {"address": self.address, "ok": True})

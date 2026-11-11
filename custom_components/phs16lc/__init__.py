@@ -17,6 +17,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .const import DOMAIN
 from .coordinator import Phs16Coordinator
 from .phs16ctl.link import PhsLink
+from .services import async_register_services, async_unregister_services
 
 # Toutes les plateformes sont en place (phases 1-5)
 PLATFORMS: list[Platform] = [
@@ -44,6 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    async_register_services(hass)  # idempotent (plusieurs entrées = plusieurs bus)
     return True
 
 
@@ -53,4 +55,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> 
     if unload_ok:
         coordinator: Phs16Coordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await hass.async_add_executor_job(coordinator.link.close)
+        if not hass.data[DOMAIN]:
+            async_unregister_services(hass)  # plus aucune entrée : retire les services
     return unload_ok

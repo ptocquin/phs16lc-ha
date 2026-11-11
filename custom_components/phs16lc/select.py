@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_RECIPES_DIR, DOMAIN, EVENT_RECIPE_APPLIED
+from .const import CONF_RECIPES_DIR, DOMAIN
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_spot_entities_listener
 from .phs16ctl.controller import LuminaireError, Recipe
@@ -113,16 +113,10 @@ class SpotRecipeSelect(_RecipeCacheMixin, Phs16Entity, SelectEntity):
         if option not in self._options:
             raise HomeAssistantError(f"Recette inconnue : {option!r}")
         try:
+            # le coordinator tire l'événement phs16lc_recipe_applied (ok/erreur)
             await self.coordinator.async_apply_recipe(self.address, option)
         except (LuminaireError, OSError, ValueError, KeyError) as exc:
-            self.hass.bus.async_fire(
-                EVENT_RECIPE_APPLIED,
-                {"address": self.address, "recipe": option, "group": None, "ok": False, "error": str(exc)},
-            )
             raise HomeAssistantError(f"SPOT {self.address} : {exc}") from exc
-        self.hass.bus.async_fire(
-            EVENT_RECIPE_APPLIED, {"address": self.address, "recipe": option, "group": None, "ok": True}
-        )
         self.async_write_ha_state()
 
 
@@ -159,16 +153,9 @@ class SpotGroupSelect(_RecipeCacheMixin, Phs16Entity, SelectEntity):
         if option not in self._options:
             raise HomeAssistantError(f"Groupe inconnu : {option!r}")
         try:
+            # le coordinator tire l'événement phs16lc_recipe_applied (ok/erreur)
             await self.coordinator.async_apply_recipe(self.address, spot.last_recipe, group=option)
         except (LuminaireError, OSError, ValueError, KeyError) as exc:
-            self.hass.bus.async_fire(
-                EVENT_RECIPE_APPLIED,
-                {"address": self.address, "recipe": spot.last_recipe, "group": option, "ok": False, "error": str(exc)},
-            )
             raise HomeAssistantError(f"SPOT {self.address} : {exc}") from exc
         spot.last_group = option
-        self.hass.bus.async_fire(
-            EVENT_RECIPE_APPLIED,
-            {"address": self.address, "recipe": spot.last_recipe, "group": option, "ok": True},
-        )
         self.async_write_ha_state()

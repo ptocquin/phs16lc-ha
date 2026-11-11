@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -21,7 +21,17 @@ from typing import Any, Callable
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_EXPECTED_SPOTS, CONF_POLL_INTERVAL, CONF_RECIPES_DIR, DOMAIN, scenes_dir_for
+from .const import (
+    CONF_EXPECTED_SPOTS,
+    CONF_POLL_INTERVAL,
+    CONF_RECIPES_DIR,
+    DOMAIN,
+    EVENT_RECIPE_APPLIED,
+    EVENT_SAVED,
+    EVENT_SCANNED,
+    EVENT_SCENE_APPLIED,
+    scenes_dir_for,
+)
 from .phs16ctl.controller import (
     CardResult,
     Luminaire,
@@ -127,6 +137,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         _LOGGER.info("Rescan PHS16-LC : %d carte(s) : %s", len(addresses), addresses)
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
+        self.hass.bus.async_fire(EVENT_SCANNED, {"addresses": addresses, "count": len(addresses)})
         return addresses
 
     # ------------------------------------------------------------------
@@ -140,7 +151,10 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         await self.async_refresh()
 
     async def async_apply_recipe(self, address: int, recipe_name: str, group: str | None = None) -> None:
-        """Applique une recette du dossier configuré à une carte (application partielle si `group`)."""
+        """Applique une recette du dossier configuré à une carte (partielle si `group`).
+
+        Tire l'événement `phs16lc_recipe_applied` (ok/erreur). Lève en cas d'échec.
+        """
         recipe_path = Path(str(self.entry.data[CONF_RECIPES_DIR])) / recipe_name
 
         def _do() -> None:
@@ -148,17 +162,32 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             lum = Luminaire(address=address, link=self.link)
             lum.apply_recipe(recipe, group=group)
 
-        await self.async_io(_do)
+        try:
+            await self.async_io(_do)
+        except (LuminaireError, OSError, ValueError, KeyError) as exc:
+            self.hass.bus.async_fire(
+                EVENT_RECIPE_APPLIED,
+                {"address": address, "recipe": recipe_name, "group": group, "ok": False, "error": str(exc)},
+            )
+            raise
         spot = self.data.spots.get(address)
         if spot is not None and group is None:
             spot.last_recipe = recipe_name
+        self.hass.bus.async_fire(
+            EVENT_RECIPE_APPLIED, {"address": address, "recipe": recipe_name, "group": group, "ok": True}
+        )
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
 
     async def async_save(self, address: int) -> None:
-        """Sauvegarde les courants en NVM (@WP)."""
+        """Sauvegarde les courants en NVM (@WP). Tire `phs16lc_saved`. Lève LuminaireError."""
         lum = Luminaire(address=address, link=self.link)
-        await self.async_io(lum.save)
+        try:
+            await self.async_io(lum.save)
+        except LuminaireError as exc:
+            self.hass.bus.async_fire(EVENT_SAVED, {"address": address, "ok": False, "error": str(exc)})
+            raise
+        self.hass.bus.async_fire(EVENT_SAVED, {"address": address, "ok": True})
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
 
@@ -178,6 +207,15 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     spot = self.data.spots.get(address)
                     if spot is not None:
                         spot.last_recipe = target.recipe_ref
+        self.hass.bus.async_fire(
+            EVENT_SCENE_APPLIED,
+            {
+                "scene": scene_name,
+                "ok": sum(1 for r in results if r.ok),
+                "errors": sum(1 for r in results if not r.ok),
+                "results": [asdict(r) for r in results],
+            },
+        )
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
         return results

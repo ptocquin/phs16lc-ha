@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.9 — 2026-11-11 — phase 6 réalisée (services phs16lc.*, 50 tests OK).
 > Version : 0.8 — 2026-11-11 — phase 5 réalisée (sensors températures/courants/ligne, 40 tests OK).
 > Version : 0.7 — 2026-11-11 — phase 4 réalisée (boutons save/scènes/scan, 36 tests OK).
 > Version : 0.6 — 2026-11-11 — phase 3 réalisée (selects recette/groupe, 31 tests OK).
@@ -237,9 +238,11 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] `entity.add_spot_entities_listener` accepte une factory retournant une liste d'entités.
 - [x] Tests : valeurs températures + device_class/state_class/unité, résumé courants + attribut channels, carte muette → unknown, line_status online/offline. **40 tests passed**.
 
-### Phase 6 — Services + traductions
-- [ ] `services.yaml` + handlers (section 5), `translations/fr.json` + `en.json`.
-- [ ] Tests : chaque service avec FakeLink.
+### Phase 6 — Services + traductions — FAITE (2026-11-11)
+- [x] `services.py` : handlers des 6 services (`scan`, `apply_recipe`, `apply_scene`, `save`, `set_channels`, `set_channel`) ; `address` = entier ou `"all"` ; `currents` accepte liste JSON ou chaîne ; validation du nombre de canaux vs la carte ; enregistrés au setup (idempotent, multi-bus) et retirés au déchargement de la dernière entrée.
+- [x] **Refactor** : les événements (`phs16lc_recipe_applied` / `_scene_applied` / `_saved` / `_scan`) sont tirés par le **coordinator** (ok/erreur), plus par select/button — un seul point d'émission, services et entités partagent le même comportement logbook.
+- [x] `services.yaml` + traductions fr/en (déjà en place depuis la phase 0).
+- [x] Tests : enregistrement/retrait des services, apply_recipe (adresse seule / `all` / inconnue → erreur), apply_scene avec `save:true` (@WP par carte), save, set_channels (chaîne + liste + contrôle de taille), set_channel (patch un canal + borne), scan. **50 tests passed**.
 
 ### Phase 7 — Polissage
 - [ ] Options flow (poll_interval, expected_spots, recipes_dir) + reconfigure.
@@ -291,3 +294,4 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 3 | `select.py` recette/groupe + événements + helper `add_spot_entities_listener` ; 31 tests passed | Options des selects mises en cache et rafraîchies à chaque update du coordinator (lecture disque en executor, jamais dans le event loop) |
 | 2026-11-11 | Phase 4 | `button.py` (save/scènes/scan) + `coordinator.async_apply_scene` ; 36 tests passed | Boutons scène au niveau du hub (device adaptateur) ; dossier scènes dérivé de `recipes_dir` (`scenes/` voisin) |
 | 2026-11-11 | Phase 5 | `sensor.py` (3 températures historisées + courants + line_status hub) ; 40 tests passed | `state_class: measurement` sur les températures pour l'historique recorder ; carte muette = `unknown` plutôt que `unavailable` |
+| 2026-11-11 | Phase 6 | `services.py` + événements déplacés dans le coordinator ; 50 tests passed | Événements émis par le coordinator (pas par les entités) : services et UI partagent le même logbook, pas de doublon |
