@@ -16,6 +16,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN
 from .coordinator import Phs16Coordinator
+from .entity import ensure_hub_device
 from .phs16ctl.link import PhsLink
 from .services import async_register_services, async_unregister_services
 
@@ -41,6 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
         raise ConfigEntryNotReady(f"Port série {port} indisponible : {exc}") from exc
 
     coordinator = Phs16Coordinator(hass, entry, link)
+    coordinator.hub_device_id = ensure_hub_device(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

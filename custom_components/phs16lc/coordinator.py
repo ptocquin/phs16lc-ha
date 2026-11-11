@@ -102,6 +102,8 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         )
         self.entry = entry
         self.link = link
+        #: id registry du device hub, renseigné par `async_setup_entry` (entity.ensure_hub_device)
+        self.hub_device_id: str = ""
         self._io_lock = asyncio.Lock()
 
     async def async_io(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:

@@ -91,6 +91,25 @@ async def test_unload_closes_serial_port(
     assert entry.entry_id not in hass.data[DOMAIN]
 
 
+async def test_spot_devices_link_to_hub_via_device_id(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Régression HA 2026.11 : `via_device` (tuple) est déprécié et fait échouer
+    l'ajout d'entités ; les SPOT doivent référencer le hub via `via_device_id`."""
+    from homeassistant.helpers import device_registry as dr
+
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    entry, _coordinator = await _setup(hass, monkeypatch, bus, expected=2)
+
+    registry = dr.async_get(hass)
+    hub = registry.async_get_device_by_identifier((DOMAIN, entry.entry_id), entry.entry_id)
+    assert hub is not None
+    for address in (1, 2):
+        spot = registry.async_get_device_by_identifier((DOMAIN, f"spot_{address}"), entry.entry_id)
+        assert spot is not None
+        assert spot.via_device_id == hub.id
+
+
 async def test_setup_retries_when_port_unavailable(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:

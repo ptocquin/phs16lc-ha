@@ -4,6 +4,7 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.5 — 2026-11-11 — procédure E2E sans matériel (fake_spot + API REST) validée et documentée (§3.4.1).
 > Version : 0.4 — 2026-11-11 — benchmark mini-PC N100 et shortlist documentés (§2.1).
 > Version : 0.3 — 2026-11-11 — question « Mac mini refurbished ? » tranchée et
 > documentée (§2.1.1) : machine dédiée = PC Linux, Mac réservé au développement.
@@ -176,9 +177,11 @@ uv run phs16ctl --port /dev/cu.usbserial-XXXX status 1
 Sans luminaire (simulateur sur port pty) :
 
 ```sh
-python3 ../light-monitor/tools/fake_spot.py --boards 3 > /tmp/port.txt 2>/tmp/trames.log &
+# --duration long indispensable : 120 s par défaut, le simulateur meurt en pleine session
+python3 ../light-monitor/tools/fake_spot.py --boards 3 --duration 86400 > /tmp/port.txt 2>/tmp/trames.log &
 sleep 1
 cd phs16ctl && uv run phs16ctl --port "$(cat /tmp/port.txt)" scan
+# trames échangées (avec checksum vérifié) dans /tmp/trames.log
 ```
 
 ### 3.3 Tests unitaires de l'intégration HA
@@ -216,6 +219,82 @@ ln -s "$PWD/custom_components/phs16lc" ~/.hass_dev/custom_components/phs16lc   #
   vers un conteneur (Docker Desktop, ou `container` d'Apple sur macOS 26) reste
   fragile ; le venv accède directement à `/dev/cu.usbserial-XXXX`. Sur le Mac,
   Docker ne sert que pour des tests sans matériel (port pty).
+
+#### 3.4.1 Scénario E2E complet sans matériel (validé le 2026-11-11)
+
+Simulateur + HA local + pilotage par API REST — permet de valider toute la chaîne
+(backend `phs16ctl`, coordinator, entités, services, événements) sans luminaire :
+
+```sh
+# 1. Simulateur 3 SPOT / 16 canaux sur un pty (--duration long ! défaut 120 s)
+ha-integration/.venv-ha/bin/python light-monitor/tools/fake_spot.py \
+    --boards 3 --channels 16 --duration 86400 > /tmp/phs_port.txt 2> /tmp/phs_trames.log &
+
+# 2. Chemin STABLE pour le pty : macOS renumérote le pty à chaque lancement
+#    (ttys011 → ttys013…), donc on fixe un symlink que l'entrée HA retiendra
+ln -sf "$(cat /tmp/phs_port.txt)" /tmp/phs_pty
+
+# 3. HA local (voir §3.4)
+ha-integration/.venv-ha/bin/hass -c ~/.hass_dev     # → http://localhost:8123
+
+# 4. Onboarding par API (premier lancement uniquement) :
+curl -s -X POST http://localhost:8123/api/onboarding/users \
+  -H 'Content-Type: application/json' \
+  -d '{"client_id":"http://localhost:8123/","name":"Dev","username":"dev","password":"…","language":"fr"}'
+#    → {"auth_code":"…"} puis ATTENTION : /auth/token (pas /api/auth/token) :
+curl -s -X POST http://localhost:8123/auth/token \
+  -d 'grant_type=authorization_code&code=<auth_code>&client_id=http://localhost:8123/'
+#    → {"access_token":"…"} : Bearer pour tous les appels suivants
+
+# 5. Config flow par API (remplacer <flow_id>) :
+curl -s -X POST http://localhost:8123/api/config/config_entries/flow \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"handler":"phs16lc","show_system_options":true}'
+curl -s -X POST http://localhost:8123/api/config/config_entries/flow/<flow_id> \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"port":"/tmp/phs_pty","expected_spots":3,"poll_interval":5,"recipes_dir":"/Users/ptocquin/.hass_dev/phs16lc/recipes"}'
+#    → create_entry avec state "loaded"
+
+# 6. Scénario E2E (exemples) :
+curl -s -X POST http://localhost:8123/api/services/light/turn_on \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"entity_id":"light.spot_1","brightness":200}'          # → @SP 0x1 1702×16
+curl -s -X POST http://localhost:8123/api/services/select/select_option \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"entity_id":"select.spot_1_recipe","option":"croissance.json"}'
+curl -s -X POST http://localhost:8123/api/services/button/press \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"entity_id":"button.phs16_lc_tmp_phs_pty_serre"}'       # scène multi-cartes
+curl -s -X POST http://localhost:8123/api/services/phs16lc/save \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"address":"1"}'
+curl -s -X POST http://localhost:8123/api/services/phs16lc/scan -H "Authorization: Bearer $TOKEN"
+
+# 7. Vérifications :
+#    - états :            GET /api/states
+#    - trames série :     /tmp/phs_trames.log (@SP/@WP/@GI/@GT avec checksum)
+#    - événements HA :    table `events` du recorder ~/.hass_dev/home-assistant_v2.db
+#                      (event_type LIKE 'phs16lc%') → visibles aussi dans le logbook
+```
+
+Résultat obtenu le 2026-11-11 : 46 entités (3 `light.spot_N`, 6 `select`, 4 `button`,
+10 `sensor`, 3 `binary_sensor`), mapping luminosité→mA vérifié (brightness 200 →
+1702 mA, 128 → 1116 mA), scène `serre.json` appliquée correctement (groupe partiel
+`500×8 + 1200×8` sur le SPOT 2 ; carte 4 absente du bus simulé = erreur comptée,
+sans plantage), événements `phs16lc_recipe_applied/scene_applied/saved/scan`
+persistés par le recorder.
+
+> **Pièges rencontrés (2026-11-11)** :
+> - `fake_spot.py` a un `--duration` de **120 s par défaut** : sans `--duration` long,
+>   le simulateur s'arrête au milieu du scan → `SerialException` côté HA.
+> - Le pty change de nom à chaque lancement du simulateur → utiliser un **symlink
+>   stable** (`/tmp/phs_pty`) comme port dans l'entrée HA.
+> - Après une modification du code de l'intégration, **redémarrer le processus
+>   `hass`** : recharger l'entrée (API `…/reload`) ne réimporte pas les modules Python.
+> - Jeton API : endpoint `POST /auth/token` (sans préfixe `/api`).
+> - HA 2026.11 : `DeviceInfo.via_device` est déprécié (suppression 2027.8) et
+>   provoquait « Error adding entity None » sur les entités des SPOT ajoutés hors
+>   du setup initial → l'intégration crée le device hub (`ensure_hub_device`) et
+>   référence les SPOT via `via_device_id` (D19, test de régression en place).
 
 ### 3.5 Checklist de validation avec les vrais luminaires (sur le Mac)
 

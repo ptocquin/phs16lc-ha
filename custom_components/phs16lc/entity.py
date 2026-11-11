@@ -4,16 +4,37 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_PORT, DOMAIN
 from .coordinator import Phs16Coordinator
 
 
+def ensure_hub_device(hass: HomeAssistant, entry) -> str:
+    """Crée (ou retrouve) le device hub du bus et retourne son id registry.
+
+    Appelé dans `async_setup_entry` : les devices SPOT y font référence via
+    `via_device_id` (le paramètre `via_device` de DeviceInfo est déprécié en
+    HA 2026.11 et fait échouer l'ajout d'entités hors du frame de setup).
+    """
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=f"PHS16-LC {entry.data[CONF_PORT]}",
+        manufacturer="Twin Development sa",
+        model="Bus RS-485 PHS16-LC",
+    )
+    return device.id
+
+
 def hub_device_info(entry_id: str, port: str) -> DeviceInfo:
-    """Device hub : l'adaptateur USB-RS422 / le bus, point d'entrée de tous les SPOT."""
+    """Device hub : l'adaptateur USB-RS422 / le bus, point d'entrée de tous les SPOT.
+
+    Mêmes identifiants que `ensure_hub_device` : un seul et même device registry.
+    """
     return DeviceInfo(
         identifiers={(DOMAIN, entry_id)},
         name=f"PHS16-LC {port}",
@@ -22,11 +43,11 @@ def hub_device_info(entry_id: str, port: str) -> DeviceInfo:
     )
 
 
-def spot_device_info(entry_id: str, address: int) -> DeviceInfo:
-    """Device d'une carte SPOT, relié au hub via `via_device`."""
+def spot_device_info(hub_device_id: str, address: int) -> DeviceInfo:
+    """Device d'une carte SPOT, relié au hub via `via_device_id` (id du device hub)."""
     return DeviceInfo(
         identifiers={(DOMAIN, f"spot_{address}")},
-        via_device=(DOMAIN, entry_id),
+        via_device_id=hub_device_id,
         name=f"SPOT {address}",
         manufacturer="Twin Development sa",
         model="PHS16-LC",
@@ -41,7 +62,7 @@ class Phs16Entity(CoordinatorEntity[Phs16Coordinator]):
     def __init__(self, coordinator: Phs16Coordinator, address: int, entity_key: str) -> None:
         super().__init__(coordinator)
         self.address = address
-        self._attr_device_info = spot_device_info(coordinator.entry.entry_id, address)
+        self._attr_device_info = spot_device_info(coordinator.hub_device_id, address)
         self._attr_unique_id = f"{coordinator.entry.entry_id}_spot_{address}_{entity_key}"
 
 

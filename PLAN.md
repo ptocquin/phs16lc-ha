@@ -5,6 +5,7 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 1.1 — 2026-11-11 — phase 8 (E2E sans matériel sur le Mac) réalisée et validée, 54 tests OK, fix `via_device_id` (D19).
 > Version : 1.0 — 2026-11-11 — phase 7 réalisée (options flow + diagnostics + lint, 53 tests OK).
 > Version : 0.9 — 2026-11-11 — phase 6 réalisée (services phs16lc.*, 50 tests OK).
 > Version : 0.8 — 2026-11-11 — phase 5 réalisée (sensors températures/courants/ligne, 40 tests OK).
@@ -254,7 +255,7 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] Tests : options flow (form + défauts + sauvegarde/reload avec nouvel intervalle), diagnostics (identité/courants/boards, carte muette). **53 tests passed**.
 
 ### Phase 8 — Validation sur MacBook Pro (sans puis avec matériel)
-- [ ] E2E sans matériel : `fake_spot.py --boards 3` sur pty → instance HA locale du Mac (`hass -c ~/.hass_dev`, port = le pty) → scénario : scan, on/off, recette, groupe, scène, save, températures.
+- [x] E2E sans matériel : `fake_spot.py --boards 3` sur pty → instance HA locale du Mac (`hass -c ~/.hass_dev`, port = le pty) → scénario : scan, on/off, recette, groupe, scène, save, températures. **Validé le 2026-11-11** (résultats dans le journal ; procédure détaillée GUIDE §3.4.1) : 46 entités, trames `@SP/@WP/@GI` vérifiées, mapping luminosité→mA OK, scène multi-cartes OK (y compris carte absente), événements `phs16lc_*` persistés par le recorder.
 - [ ] Validation avec vrais luminaires branchés sur le Mac : checklist du GUIDE §3.5.
 
 ### Phase 9 — Déploiement sur le PC Linux dédié
@@ -299,3 +300,5 @@ Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
 | 2026-11-11 | Phase 5 | `sensor.py` (3 températures historisées + courants + line_status hub) ; 40 tests passed | `state_class: measurement` sur les températures pour l'historique recorder ; carte muette = `unknown` plutôt que `unavailable` |
 | 2026-11-11 | Phase 6 | `services.py` + événements déplacés dans le coordinator ; 50 tests passed | Événements émis par le coordinator (pas par les entités) : services et UI partagent le même logbook, pas de doublon |
 | 2026-11-11 | Phase 7 | Options flow + reload à chaud, `diagnostics.py`, `entry_value()`, ruff (vendored exclu), 53 tests passed | Options flow via `hass.config_entries.options.async_init` (pas `.flow`) ; `vol` default devenu factory (lambda) en 2026.11 ; carte morte au scan initial = non découverte (comportement scan_line) |
+| 2026-11-11 | Phase 8 | E2E sans matériel validé sur le Mac (HA 2026.11.1 en venv `hass -c ~/.hass_dev`, `fake_spot.py --boards 3` sur pty, pilotage par API REST) : 46 entités (3 lights, 6 selects, 4 boutons, 10 sensors, 3 binary_sensors), `light.turn_on` brightness 200 → `@SP 0x1 1702×16`, recette `croissance.json` → `800×8 + 0×8`, scène `serre.json` → spot 2 en partiel `500×8 + 1200×8` et carte 4 absente comptabilisée en erreur sans plantage, `@WP` save OK, rescan OK, événements `phs16lc_recipe_applied/scene_applied/saved/scan` bien écrits dans le recorder (table `events` de `home-assistant_v2.db`) → logbook/historique | Recettes copiées dans `~/.hass_dev/phs16lc/recipes` ; onboarding + config flow faits en API (`POST /auth/token`, pas `/api/auth/token`) ; gotchas documentés GUIDE §3.4.1 : `fake_spot.py --duration` (120 s par défaut) à passer long, symlink stable `/tmp/phs_pty` (le pty change de nom à chaque lancement), **redémarrer le process hass** après une modif de code (le reload d'entry ne réimporte pas les modules) |
+| 2026-11-11 | D19 | `DeviceInfo.via_device` (tuple) remplacé par `via_device_id` (id registry du hub créé via `ensure_hub_device()` dans `async_setup_entry`) | HA 2026.11 déprécie `via_device` (suppression 2027.8) et lève `MissingIntegrationFrame` → « Error adding entity None » sur les selects des SPOT 2/3 en live ; test de régression `test_spot_devices_link_to_hub_via_device_id`, 54 tests passed, 0 erreur au boot live |
