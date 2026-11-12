@@ -4,6 +4,7 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.7 — 2026-11-12 — §4.3 méthode 2 détaillée : `git subtree push --prefix=ha-integration` vers un dépôt GitHub dédié, installable via le Marketplace intégré.
 > Version : 0.6 — 2026-11-11 — outils de déploiement documentés (§4.3 : package_release.py + deploy_to_linux.sh).
 > Version : 0.5 — 2026-11-11 — procédure E2E sans matériel (fake_spot + API REST) validée et documentée (§3.4.1).
 > Version : 0.4 — 2026-11-11 — benchmark mini-PC N100 et shortlist documentés (§2.1).
@@ -379,12 +380,40 @@ python3 ha-integration/tools/package_release.py --dest dist   # → dist/phs16lc
 # layout du zip = racine du dépôt ha-integration/ : hacs.json, brand/, custom_components/phs16lc/
 ```
 
-**Méthode 2 — dépôt git privé + Marketplace** (mises à jour en un clic, avec
-entité « update ») : pousser ce dossier `ha-integration/` sur un dépôt git privé,
-puis dans HA : Réglages → Marketplace → ⋮ → **Dépôts personnalisés** → ajouter
-l'URL du dépôt, catégorie « Intégrations », puis installer `phs16lc`.
-Le dépôt doit contenir `hacs.json` (présent) et les fichiers sous
-`custom_components/phs16lc/`.
+**Méthode 2 — dépôt GitHub dédié + Marketplace** (mises à jour en un clic, avec
+entité « update ») : pousser **uniquement le contenu de `ha-integration/`** à la
+racine d'un dépôt GitHub dédié. Ce dossier a déjà exactement le layout attendu à
+la racine d'un dépôt Marketplace : `hacs.json`, `brand/`, `README.md` et
+`custom_components/phs16lc/` (layout vérifié par `tests/test_release.py`).
+
+```sh
+cd /Users/ptocquin/RunningProjects/phs16lc
+
+# 1. Créer un dépôt GitHub VIDE dédié (ex: github.com/ptocquin/phs16lc-ha),
+#    public recommandé (un dépôt privé fonctionne avec un PAT dans l'URL :
+#    https://<token>@github.com/ptocquin/phs16lc-ha.git)
+git remote add ha-dist https://github.com/ptocquin/phs16lc-ha.git
+
+# 2. Premier push : `git subtree push` construit un historique synthétique
+#    ne contenant QUE ha-integration/ et le pousse sur la branche main
+git subtree push --prefix=ha-integration ha-dist main
+
+# 3. À chaque nouvelle version : bump de "version" dans
+#    ha-integration/custom_components/phs16lc/manifest.json, commit, tag vX.Y.Z,
+#    puis re-push :
+git subtree push --prefix=ha-integration ha-dist main
+```
+
+> HA ne lit que `hacs.json` et `custom_components/` à la racine du dépôt : les
+> fichiers auxiliaires poussés avec (`tests/`, `tools/`, `pyproject.toml`,
+> `dist/*.zip`) sont simplement ignorés. Ne pas initialiser le dépôt GitHub avec
+> un README (sinon le premier `subtree push` refusera de pousser sur `main`).
+
+Dans HA (2026.11 : le **Marketplace est intégré** à Réglages, plus besoin de
+l'add-on HACS) : Réglages → Marketplace → ⋮ → **Dépôts personnalisés** → coller
+l'URL du dépôt, catégorie « Intégrations » → la carte « PHS16-LC » apparaît →
+**Installer** → redémarrer HA → Réglages → Appareils et services → Ajouter une
+intégration → « PHS16-LC » (puis paramétrage §4.4).
 
 > Le Marketplace affiche un avertissement : le contenu communautaire n'est ni
 > testé ni supporté par le projet Home Assistant. C'est attendu pour une
