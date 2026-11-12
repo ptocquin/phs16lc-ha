@@ -1,0 +1,62 @@
+blueprint:
+  name: "PHS16-LC — Alertes d'une chambre (température / carte hors ligne)"
+  description: >
+    Surveille le capteur « température max » de la chambre (helper Min/Max, type Max,
+    sur les capteurs temperature des SPOT) et le groupe binaire « toutes les cartes en
+    ligne » (helper Groupe, type « toutes », sur les binary_sensor …online). Envoie une
+    notification si la température dépasse le seuil ou si une carte passe hors ligne.
+  domain: automation
+  input:
+    temp_max:
+      name: Capteur « température max » de la chambre
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    toutes_en_ligne:
+      name: Groupe binaire « toutes les cartes en ligne » (ON = tout le monde répond)
+      selector:
+        entity:
+          domain: binary_sensor
+    seuil:
+      name: Seuil d'alerte température
+      default: 65
+      selector:
+        number:
+          min: 30
+          max: 90
+          step: 1
+          mode: box
+          unit_of_measurement: "°C"
+    notification:
+      name: Notifications mobiles (optionnel, plusieurs possibles)
+      default: []
+      selector:
+        entity:
+          domain: notify
+          multiple: true
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input temp_max
+    above: !input seuil
+  - platform: state
+    entity_id: !input toutes_en_ligne
+    to: "off"
+
+action:
+  - service: persistent_notification.create
+    data:
+      title: "PHS16-LC — alerte"
+      message: "{{ trigger.entity_id }} → {{ trigger.to_state.state }}"
+  - choose:
+      - conditions: "{{ notification | length > 0 }}"
+        sequence:
+          - service: notify.notify
+            target:
+              entity_id: !input notification
+            data:
+              title: "PHS16-LC — alerte"
+              message: "{{ trigger.entity_id }} → {{ trigger.to_state.state }}"
+
+mode: queued

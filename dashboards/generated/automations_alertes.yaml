@@ -1,0 +1,30 @@
+# Alertes température / carte HS. Inclure via `automation: !include dashboards/generated/automations_alertes.yaml`
+# Généré par dashboards/generate_dashboards.py — ne pas éditer à la main.
+- alias: PHS16-LC — Alerte Serre 1
+  trigger:
+  - platform: numeric_state
+    entity_id: sensor.serre_1_temp_max
+    above: 65
+  - platform: state
+    entity_id: binary_sensor.serre_1_hors_ligne
+    to: 'on'
+  action:
+  - service: persistent_notification.create
+    data:
+      title: PHS16-LC — Serre 1
+      message: '{{ trigger.entity_id }} → {{ trigger.to_state.state }}'
+  mode: queued
+- alias: PHS16-LC — Alerte Serre 2
+  trigger:
+  - platform: numeric_state
+    entity_id: sensor.serre_2_temp_max
+    above: 65
+  - platform: state
+    entity_id: binary_sensor.serre_2_hors_ligne
+    to: 'on'
+  action:
+  - service: persistent_notification.create
+    data:
+      title: PHS16-LC — Serre 2
+      message: '{{ trigger.entity_id }} → {{ trigger.to_state.state }}'
+  mode: queued

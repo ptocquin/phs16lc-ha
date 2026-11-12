@@ -1,0 +1,8 @@
+# Scripts. Inclure via `script: !include dashboards/generated/scripts.yaml`
+# Généré par dashboards/generate_dashboards.py — ne pas éditer à la main.
+phs16lc_save_nvm_all:
+  alias: PHS16-LC — Tout sauvegarder en NVM (@WP all)
+  sequence:
+  - service: phs16lc.save
+    data:
+      address: all

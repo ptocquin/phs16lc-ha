@@ -1,0 +1,614 @@
+# Dashboard Lovelace « Culture » (vues sections).
+# Généré par dashboards/generate_dashboards.py — ne pas éditer à la main.
+title: Culture
+icon: mdi:sprout
+views:
+- title: Vue d'ensemble
+  path: overview
+  type: sections
+  sections:
+  - type: grid
+    cards:
+    - type: markdown
+      content: '**À l''install** : poser les labels `<chambre>_<groupe>` sur les devices SPOT, créer areas + helpers (voir
+        `dashboards/generated/helpers_a_creer.md`), ajuster l''entity_id du capteur `line_status` (device hub, dépend du port
+        série).'
+    - type: tile
+      entity: light.serre_1_tous
+      name: Serre 1
+      icon: mdi:sprout
+      tap_action:
+        action: navigate
+        navigation_path: /culture/serre_1
+      features:
+      - type: light-brightness
+    - type: tile
+      entity: sensor.serre_1_temp_max
+      name: Serre 1 — temp max
+    - type: tile
+      entity: binary_sensor.serre_1_hors_ligne
+      name: Serre 1 — carte HS
+    - type: tile
+      entity: light.serre_2_tous
+      name: Serre 2
+      icon: mdi:sprout
+      tap_action:
+        action: navigate
+        navigation_path: /culture/serre_2
+      features:
+      - type: light-brightness
+    - type: tile
+      entity: sensor.serre_2_temp_max
+      name: Serre 2 — temp max
+    - type: tile
+      entity: binary_sensor.serre_2_hors_ligne
+      name: Serre 2 — carte HS
+    - type: tile
+      entity: sensor.phs16_lc_line_status
+      name: Cartes en ligne (bus)
+- title: Serre 1
+  path: serre_1
+  type: sections
+  sections:
+  - type: grid
+    cards:
+    - type: picture-elements
+      image: /local/plans/serre1.png
+      elements:
+      - type: image
+        image: /local/plans/serre1_zone_nord.png
+        style:
+          top: 0%
+          left: 0%
+          width: 100%
+        tap_action:
+          action: none
+      - type: image
+        image: /local/plans/serre1_zone_sud.png
+        style:
+          top: 0%
+          left: 0%
+          width: 100%
+        tap_action:
+          action: none
+      - type: state-icon
+        entity: light.spot_1
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 22%
+          left: 25%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_1_temp_cpu
+        style:
+          top: 15%
+          left: 24%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_1_online
+        icon: mdi:lan
+        style:
+          top: 29%
+          left: 24%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_2
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 22%
+          left: 45%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_2_temp_cpu
+        style:
+          top: 15%
+          left: 44%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_2_online
+        icon: mdi:lan
+        style:
+          top: 29%
+          left: 44%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_3
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 55%
+          left: 25%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_3_temp_cpu
+        style:
+          top: 48%
+          left: 24%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_3_online
+        icon: mdi:lan
+        style:
+          top: 62%
+          left: 24%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_4
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 55%
+          left: 45%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_4_temp_cpu
+        style:
+          top: 48%
+          left: 44%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_4_online
+        icon: mdi:lan
+        style:
+          top: 62%
+          left: 44%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_5
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 22%
+          left: 75%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_5_temp_cpu
+        style:
+          top: 15%
+          left: 74%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_5_online
+        icon: mdi:lan
+        style:
+          top: 29%
+          left: 74%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_6
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 55%
+          left: 75%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_6_temp_cpu
+        style:
+          top: 48%
+          left: 74%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_6_online
+        icon: mdi:lan
+        style:
+          top: 62%
+          left: 74%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_7
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 80%
+          left: 50%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_7_temp_cpu
+        style:
+          top: 73%
+          left: 49%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_7_online
+        icon: mdi:lan
+        style:
+          top: 87%
+          left: 49%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+  - type: grid
+    cards:
+    - type: markdown
+      content: '**Attention** — ne pas régler la **luminosité** d''un groupe : cela envoie un courant uniforme aux 16 canaux
+        de chaque SPOT et écrase la recette. On/off OK (la recette se réapplique), intensité = recette.'
+    - type: custom:auto-entities
+      card:
+        type: entities
+        title: Groupe nord
+      filter:
+        include:
+        - domain: light
+          label: serre_1_nord
+      sort:
+        method: name
+    - type: tile
+      entity: light.serre_1_groupe_nord
+      name: Groupe nord
+      features:
+      - type: light-brightness
+    - type: tile
+      entity: input_boolean.manuel_serre_1_nord
+      name: Manuel — nord
+    - type: custom:auto-entities
+      card:
+        type: entities
+        title: Groupe sud
+      filter:
+        include:
+        - domain: light
+          label: serre_1_sud
+      sort:
+        method: name
+    - type: tile
+      entity: light.serre_1_groupe_sud
+      name: Groupe sud
+      features:
+      - type: light-brightness
+    - type: tile
+      entity: input_boolean.manuel_serre_1_sud
+      name: Manuel — sud
+- title: Serre 2
+  path: serre_2
+  type: sections
+  sections:
+  - type: grid
+    cards:
+    - type: picture-elements
+      image: /local/plans/serre2.png
+      elements:
+      - type: state-icon
+        entity: light.spot_8
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 30%
+          left: 30%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_8_temp_cpu
+        style:
+          top: 23%
+          left: 29%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_8_online
+        icon: mdi:lan
+        style:
+          top: 37%
+          left: 29%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_9
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 30%
+          left: 60%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_9_temp_cpu
+        style:
+          top: 23%
+          left: 59%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_9_online
+        icon: mdi:lan
+        style:
+          top: 37%
+          left: 59%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-icon
+        entity: light.spot_10
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        style:
+          top: 65%
+          left: 45%
+        state:
+        - value: 'off'
+          style:
+            filter: grayscale(1)
+            opacity: 0.35
+      - type: state-badge
+        entity: sensor.spot_10_temp_cpu
+        style:
+          top: 58%
+          left: 44%
+        state:
+        - operator: '>'
+          value: 60
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+      - type: state-badge
+        entity: binary_sensor.spot_10_online
+        icon: mdi:lan
+        style:
+          top: 72%
+          left: 44%
+        state:
+        - value: 'off'
+          style:
+            color: '#ff5252'
+            --state-badge-color: '#ff5252'
+  - type: grid
+    cards:
+    - type: markdown
+      content: '**Attention** — ne pas régler la **luminosité** d''un groupe : cela envoie un courant uniforme aux 16 canaux
+        de chaque SPOT et écrase la recette. On/off OK (la recette se réapplique), intensité = recette.'
+    - type: custom:auto-entities
+      card:
+        type: entities
+        title: Groupe all
+      filter:
+        include:
+        - domain: light
+          label: serre_2_all
+      sort:
+        method: name
+    - type: tile
+      entity: light.serre_2_groupe_all
+      name: Groupe all
+      features:
+      - type: light-brightness
+    - type: tile
+      entity: input_boolean.manuel_serre_2_all
+      name: Manuel — all
+- title: Programmes
+  path: programmes
+  type: sections
+  sections:
+  - type: grid
+    cards:
+    - type: entities
+      title: Photopériodes (cliquer pour éditer les horaires)
+      entities:
+      - schedule.photo_serre_1_nord
+      - schedule.photo_serre_1_sud
+      - schedule.photo_serre_2_all
+    - type: entities
+      title: Modes manuels (ON = l'automatisation ne touche à rien)
+      entities:
+      - input_boolean.manuel_serre_1_nord
+      - input_boolean.manuel_serre_1_sud
+      - input_boolean.manuel_serre_2_all
+    - type: entities
+      title: Recettes par groupe
+      entities:
+      - input_select.recette_serre_1_nord
+      - input_select.recette_serre_1_sud
+      - input_select.recette_serre_2_all
+    - type: tile
+      entity: script.phs16lc_save_nvm_all
+      name: Tout sauvegarder en NVM (@WP)
+    - type: markdown
+      content: 'Boutons **Scanner la ligne** et **Scène …** : sur le device hub PHS16-LC (entity_id dépendant du port série,
+        ex. `button.phs16_lc_dev_ttyusb0_scan`).'
+- title: Monitoring
+  path: monitoring
+  type: sections
+  sections:
+  - type: grid
+    cards:
+    - type: custom:mini-graph-card
+      name: Serre 1 — températures
+      entities:
+      - sensor.spot_1_temp_cpu
+      - sensor.spot_1_temp_led1
+      - sensor.spot_1_temp_led2
+      - sensor.spot_2_temp_cpu
+      - sensor.spot_2_temp_led1
+      - sensor.spot_2_temp_led2
+      - sensor.spot_3_temp_cpu
+      - sensor.spot_3_temp_led1
+      - sensor.spot_3_temp_led2
+      - sensor.spot_4_temp_cpu
+      - sensor.spot_4_temp_led1
+      - sensor.spot_4_temp_led2
+      - sensor.spot_5_temp_cpu
+      - sensor.spot_5_temp_led1
+      - sensor.spot_5_temp_led2
+      - sensor.spot_6_temp_cpu
+      - sensor.spot_6_temp_led1
+      - sensor.spot_6_temp_led2
+      - sensor.spot_7_temp_cpu
+      - sensor.spot_7_temp_led1
+      - sensor.spot_7_temp_led2
+      line_width: 2
+      show:
+        legend: true
+        points: false
+    - type: gauge
+      name: Serre 1 — temp max
+      entity: sensor.serre_1_temp_max
+      min: 0
+      max: 80
+      severity:
+        green: 0
+        yellow: 50
+        red: 65
+    - type: custom:mini-graph-card
+      name: Serre 2 — températures
+      entities:
+      - sensor.spot_8_temp_cpu
+      - sensor.spot_8_temp_led1
+      - sensor.spot_8_temp_led2
+      - sensor.spot_9_temp_cpu
+      - sensor.spot_9_temp_led1
+      - sensor.spot_9_temp_led2
+      - sensor.spot_10_temp_cpu
+      - sensor.spot_10_temp_led1
+      - sensor.spot_10_temp_led2
+      line_width: 2
+      show:
+        legend: true
+        points: false
+    - type: gauge
+      name: Serre 2 — temp max
+      entity: sensor.serre_2_temp_max
+      min: 0
+      max: 80
+      severity:
+        green: 0
+        yellow: 50
+        red: 65

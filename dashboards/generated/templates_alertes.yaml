@@ -1,0 +1,26 @@
+# Template sensors par chambre. Inclure via `template: !include dashboards/generated/templates_alertes.yaml`
+# Généré par dashboards/generate_dashboards.py — ne pas éditer à la main.
+- sensor:
+  - name: Serre 1 — Température max
+    unique_id: serre_1_temp_max
+    unit_of_measurement: °C
+    state_class: measurement
+    state: '{% set t = area_entities(''serre_1'') | select(''match'', ''sensor\.spot_\d+_temp_'') | map(''states'') | map(''float'',
+      0) | list %}{{ t | max if t else ''unknown'' }}'
+- binary_sensor:
+  - name: Serre 1 — Carte hors ligne
+    unique_id: serre_1_hors_ligne
+    state: '{% set off = area_entities(''serre_1'') | select(''match'', ''binary_sensor\.spot_\d+_online'') | select(''is_state'',
+      ''off'') | list %}{{ ''on'' if off | count > 0 else ''off'' }}'
+- sensor:
+  - name: Serre 2 — Température max
+    unique_id: serre_2_temp_max
+    unit_of_measurement: °C
+    state_class: measurement
+    state: '{% set t = area_entities(''serre_2'') | select(''match'', ''sensor\.spot_\d+_temp_'') | map(''states'') | map(''float'',
+      0) | list %}{{ t | max if t else ''unknown'' }}'
+- binary_sensor:
+  - name: Serre 2 — Carte hors ligne
+    unique_id: serre_2_hors_ligne
+    state: '{% set off = area_entities(''serre_2'') | select(''match'', ''binary_sensor\.spot_\d+_online'') | select(''is_state'',
+      ''off'') | list %}{{ ''on'' if off | count > 0 else ''off'' }}'

@@ -1,0 +1,24 @@
+blueprint:
+  name: "PHS16-LC — Save NVM global (@WP all) à heure fixe"
+  description: >
+    Sauvegarde toutes les cartes en NVM (@WP all) à l'heure choisie (3h du matin par
+    défaut). Couvre aussi les réglages de luminosité faits à la main, qui ne tirent
+    pas l'event phs16lc_recipe_applied.
+  domain: automation
+  input:
+    heure:
+      name: Heure
+      default: "03:00:00"
+      selector:
+        time: {}
+
+trigger:
+  - platform: time
+    at: !input heure
+
+action:
+  - service: phs16lc.save
+    data:
+      address: "all"
+
+mode: single

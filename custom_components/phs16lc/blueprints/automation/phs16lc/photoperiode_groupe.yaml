@@ -1,0 +1,70 @@
+blueprint:
+  name: "PHS16-LC — Photopériode d'un groupe de luminaires"
+  description: >
+    Allume/éteint un groupe de luminaires (light group ou area) selon un schedule
+    (programme de photopériode). Tant que le booléen « mode manuel » est ON,
+    l'automatisation ne touche à rien ; au retour en automatique, l'état courant
+    du schedule est réappliqué. turn_on sans luminosité : chaque SPOT réapplique
+    sa dernière recette (décision D11 de l'intégration).
+  domain: automation
+  input:
+    programme:
+      name: Schedule (photopériode)
+      description: Helper « Programme » (schedule), ex. schedule.photo_serre_1_nord
+      selector:
+        entity:
+          domain: schedule
+    cible:
+      name: Cible (light group du sous-groupe, ou area de la chambre)
+      selector:
+        target:
+          entity:
+            domain: light
+    mode_manuel:
+      name: Mode manuel (ON = l'automatisation ne touche à rien)
+      selector:
+        entity:
+          domain: input_boolean
+
+trigger:
+  - platform: state
+    entity_id: !input programme
+    to: "on"
+  - platform: state
+    entity_id: !input programme
+    to: "off"
+  - platform: state
+    entity_id: !input mode_manuel
+    to: "off"   # retour en automatique : resynchroniser avec l'état courant du schedule
+
+condition:
+  - condition: state
+    entity_id: !input mode_manuel
+    state: "off"
+
+action:
+  - choose:
+      # Retour du mode manuel -> réappliquer l'état courant du schedule
+      - conditions: "{{ trigger.entity_id == input_mode_manuel }}"
+        sequence:
+          - choose:
+              - conditions: "{{ states(programme) == 'on' }}"
+                sequence:
+                  - service: light.turn_on
+                    target: !input cible
+              - conditions: "{{ states(programme) == 'off' }}"
+                sequence:
+                  - service: light.turn_off
+                    target: !input cible
+      # Schedule passe à ON
+      - conditions: "{{ trigger.to == 'on' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input cible
+      # Schedule passe à OFF
+      - conditions: "{{ trigger.to == 'off' }}"
+        sequence:
+          - service: light.turn_off
+            target: !input cible
+
+mode: queued

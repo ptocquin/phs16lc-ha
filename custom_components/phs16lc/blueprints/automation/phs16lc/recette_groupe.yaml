@@ -1,0 +1,38 @@
+blueprint:
+  name: "PHS16-LC — Appliquer la recette choisie à un groupe de luminaires"
+  description: >
+    Quand l'input_select « recette du groupe » change, applique la recette choisie
+    à tous les SPOT du light group (via phs16lc.apply_recipe, en boucle : le service
+    n'accepte pas de target HA area/label). L'adresse du SPOT est extraite du nom
+    d'entité light.spot_<n>.
+  domain: automation
+  input:
+    select_recette:
+      name: Input select « recette du groupe »
+      description: Ex. input_select.recette_serre_1_nord (options = fichiers recipes/*.json)
+      selector:
+        entity:
+          domain: input_select
+    groupe:
+      name: Light group du sous-groupe
+      description: Ex. light.serre_1_groupe_nord (créé par generate_dashboards.py)
+      selector:
+        entity:
+          domain: light
+
+trigger:
+  - platform: state
+    entity_id: !input select_recette
+
+action:
+  - variables:
+      membres: "{{ expand(groupe) | map(attribute='entity_id') | list }}"
+  - repeat:
+      for_each: "{{ membres }}"
+      sequence:
+        - service: phs16lc.apply_recipe
+          data:
+            address: "{{ repeat.item.split('spot_')[-1] }}"
+            recipe: "{{ states(select_recette) }}"
+
+mode: queued

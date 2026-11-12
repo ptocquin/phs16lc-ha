@@ -1,0 +1,21 @@
+blueprint:
+  name: "PHS16-LC — Save NVM (@WP) après chaque recette appliquée"
+  description: >
+    L'intégration tire l'event phs16lc_recipe_applied {address, recipe, group, ok} à
+    chaque application de recette. Ce blueprint sauvegarde ensuite le SPOT en mémoire
+    non volatile (@WP) : sans @WP, les courants (@SP) sont perdus à la mise hors tension.
+  domain: automation
+
+trigger:
+  - platform: event
+    event_type: phs16lc_recipe_applied
+
+condition:
+  - "{{ trigger.event.data.ok == true }}"
+
+action:
+  - service: phs16lc.save
+    data:
+      address: "{{ trigger.event.data.address }}"
+
+mode: single

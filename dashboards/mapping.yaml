@@ -1,0 +1,66 @@
+# Mapping des chambres de culture PHS16-LC.
+# Remplis ce fichier, puis régénère la configuration HA :
+#   cd ha-integration
+#   uv run python dashboards/generate_dashboards.py
+# Les fichiers produits partent dans dashboards/generated/ (voir README.md).
+#
+# Conventions de nommage (le générateur s'y appuie, ne les change pas à la légère) :
+#   area HA            : l'area doit avoir pour identifiant (slug) la clé de la chambre
+#                        ex. area « Serre 1 » -> area_id `serre_1`
+#   label par groupe   : <chambre>_<groupe>          ex. serre_1_nord  (posé sur chaque device SPOT du groupe)
+#   light group        : light.<chambre>_groupe_<groupe> et light.<chambre>_tous
+#   schedule           : schedule.photo_<chambre>_<groupe>      (helper à créer dans l'UI)
+#   mode manuel        : input_boolean.manuel_<chambre>_<groupe> (helper à créer dans l'UI)
+#   recette du groupe  : input_select.recette_<chambre>_<groupe> (helper à créer, options = fichiers recipes/*.json)
+#
+# `coords` : position de chaque SPOT sur l'image du plan, en % (top/left) pour picture-elements.
+# `zones`  : optionnel, PNG transparents colorés par sous-groupe, affichés en fond de plan.
+
+chambres:
+  serre_1:
+    nom: "Serre 1"
+    plan: /local/plans/serre1.png
+    zones:
+      nord: /local/plans/serre1_zone_nord.png
+      sud: /local/plans/serre1_zone_sud.png
+    groupes:
+      nord: [1, 2, 3, 4]
+      sud: [5, 6, 7]
+    coords:
+      "1": { top: 22, left: 25 }
+      "2": { top: 22, left: 45 }
+      "3": { top: 55, left: 25 }
+      "4": { top: 55, left: 45 }
+      "5": { top: 22, left: 75 }
+      "6": { top: 55, left: 75 }
+      "7": { top: 80, left: 50 }
+
+  serre_2:
+    nom: "Serre 2"
+    plan: /local/plans/serre2.png
+    groupes:
+      all: [8, 9, 10]
+    coords:
+      "8":  { top: 30, left: 30 }
+      "9":  { top: 30, left: 60 }
+      "10": { top: 65, left: 45 }
+
+  # serre_3, serre_4, serre_5 : à remplir sur le même modèle.
+  # Une chambre sans aucun SPOT est ignorée par le générateur (warning).
+  serre_3:
+    nom: "Serre 3"
+    plan: /local/plans/serre3.png
+    groupes: {}
+    coords: {}
+
+  serre_4:
+    nom: "Serre 4"
+    plan: /local/plans/serre4.png
+    groupes: {}
+    coords: {}
+
+  serre_5:
+    nom: "Serre 5"
+    plan: /local/plans/serre5.png
+    groupes: {}
+    coords: {}
