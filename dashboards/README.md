@@ -18,7 +18,8 @@ dashboards/
 └── generated/                 ← sortie du générateur (ne pas éditer à la main)
 
 custom_components/phs16lc/blueprints/automation/phs16lc/   ← blueprints embarqués dans
-    l'intégration : visibles dans Réglages → Automatisations → Créer → onglet « Blueprint »
+    l'intégration, copiés automatiquement au démarrage dans
+    /config/blueprints/automation/phs16lc/ (visibles dans l'onglet « Blueprint »)
     ├── photoperiode_groupe.yaml      schedule -> light group (+ mode manuel + resync)
     ├── recette_groupe.yaml           input_select -> apply_recipe sur tout le groupe
     ├── alerte_chambre.yaml           temp max / carte hors ligne -> notification
@@ -56,16 +57,18 @@ Aucune édition de fichier YAML requise. Dans l'ordre :
    - Par chambre : **Capteur → Min/Max** (type Max) sur les capteurs température des
      SPOT = `sensor.serre_1_temp_max` ; **Groupe → Binary sensor** (type « toutes »)
      sur les `binary_sensor.spot_n_online` = « toutes les cartes en ligne ».
-4. **Blueprints** : Réglages → Automatisations et scènes → « Créer une automatisation » →
-   onglet **Blueprint** → choisir « PHS16-LC — … » et créer une instance :
+4. **Blueprints** : l'intégration copie automatiquement ses blueprints au démarrage dans
+   `/config/blueprints/automation/phs16lc/` — après un redémarrage de HA, ils apparaissent
+   dans Réglages → Automatisations et scènes → « Créer une automatisation » → onglet
+   **Blueprint** → choisir « PHS16-LC — … » et créer une instance :
    - *Photopériode d'un groupe* par sous-groupe (programme + light group + booléen manuel) ;
    - *Recette d'un groupe* par sous-groupe (input_select + light group) ;
    - *Alertes d'une chambre* par chambre (temp max + groupe binaire + seuil + notif) ;
    - *Save NVM après recette* (1 seule instance, aucun paramètre) ;
    - *Save NVM global* (1 seule instance, heure 3h par défaut).
-   > Si les blueprints PHS16-LC n'apparaissent pas dans l'onglet, les copier à la main
-   > (une seule fois) : `custom_components/phs16lc/blueprints/automation/phs16lc/*.yaml`
-   > → `/config/blueprints/automation/phs16lc/` (via l'add-on File editor).
+   > Copie manuelle de secours (si besoin) : `custom_components/phs16lc/blueprints/automation/phs16lc/*.yaml`
+   > → `/config/blueprints/automation/phs16lc/` (via l'add-on File editor). Note : les
+   > blueprints embarqués écrasent ceux de `/config` dont le contenu diffère au redémarrage.
 5. **Dashboard** : Tableaux de bord → « + » → « Culture » (URL `culture`), puis pour
    chaque vue (Vue d'ensemble, Serre 1…5, Programmes, Monitoring) : « Ajouter une vue »,
    type **Sections**, puis « Ajouter une carte » au picker :

@@ -41,7 +41,9 @@ Services : `phs16lc.scan`, `phs16lc.apply_recipe`, `phs16lc.apply_scene`,
 
 - **Blueprints embarqués** dans `custom_components/phs16lc/blueprints/automation/phs16lc/`
   (photopériode de groupe avec mode manuel, recette de groupe, alertes de chambre,
-  sauvegarde NVM) : visibles dans Réglages → Automatisations → Créer → onglet Blueprint.
+  sauvegarde NVM) : copiés automatiquement au démarrage dans
+  `/config/blueprints/automation/phs16lc/`, donc visibles dans Réglages →
+  Automatisations → Créer → onglet Blueprint.
 - [`dashboards/`](dashboards/) : configuration « Culture » (chambres, sous-groupes,
   plans, recettes, photopériodes). Installable **100 % via l'interface graphique**
   (voir [`dashboards/README.md`](dashboards/README.md) §2) ou générée depuis

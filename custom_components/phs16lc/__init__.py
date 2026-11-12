@@ -9,16 +9,27 @@ doit pas tourner en parallèle sur le même port.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 from .coordinator import Phs16Coordinator
 from .entity import ensure_hub_device
 from .phs16ctl.link import PhsLink
 from .services import async_register_services, async_unregister_services
+
+_LOGGER = logging.getLogger(__name__)
+
+# Blueprints embarqués, copiés vers /config/blueprints/automation/phs16lc/ au démarrage :
+# HA ne lit les blueprints que depuis /config/blueprints/, donc sans cette copie ils
+# n'apparaîtraient pas dans Réglages → Automatisations → Créer → onglet Blueprint.
+BLUEPRINTS_SRC_DIR = Path(__file__).parent / "blueprints" / "automation"
 
 # Toutes les plateformes sont en place (phases 1-5)
 PLATFORMS: list[Platform] = [
@@ -30,6 +41,35 @@ PLATFORMS: list[Platform] = [
 ]
 
 Phs16lcConfigEntry = ConfigEntry
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Installe les blueprints embarqués dans /config/blueprints/automation/phs16lc/."""
+    await async_install_blueprints(hass)
+    return True
+
+
+async def async_install_blueprints(hass: HomeAssistant) -> int:
+    """Copie les blueprints embarqués (executor). Retourne le nombre de fichiers écrits."""
+    dest_root = Path(hass.config.path("blueprints", "automation", DOMAIN))
+    return await hass.async_add_executor_job(_install_blueprints, dest_root)
+
+
+def _install_blueprints(dest_root: Path) -> int:
+    """Copie chaque blueprint embarqué si absent ou modifié. Retourne le nb de fichiers écrits."""
+    if not BLUEPRINTS_SRC_DIR.is_dir():
+        return 0
+    copied = 0
+    for src in sorted(BLUEPRINTS_SRC_DIR.rglob("*.yaml")):
+        dest = dest_root / src.relative_to(BLUEPRINTS_SRC_DIR)
+        content = src.read_text(encoding="utf-8")
+        if dest.exists() and dest.read_text(encoding="utf-8") == content:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        copied += 1
+        _LOGGER.info("Blueprint installé/mis à jour : %s", dest)
+    return copied
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> bool:
@@ -48,6 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)  # idempotent (plusieurs entrées = plusieurs bus)
+    await async_install_blueprints(hass)  # au cas où async_setup n'aurait pas tourné
     # Options modifiées dans l'UI -> recharge l'entrée (nouvel intervalle de polling, etc.)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
