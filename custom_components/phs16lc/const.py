@@ -78,6 +78,16 @@ def groups_file_for(recipes_dir: str | Path) -> Path:
     return resolve_config_path(str(Path(recipes_dir).parent / GROUPS_FILENAME))
 
 
+# État persisté de la synchro des registres (labels/areas) : permet de ne jamais
+# réécrite une valeur modifiée manuellement dans l'UI (voir groups.sync_group_registries)
+SYNC_STATE_FILENAME = ".groups_sync_state.json"
+
+
+def sync_state_file_for(recipes_dir: str | Path) -> Path:
+    """Fichier d'état de la synchro = `.groups_sync_state.json` à côté de groups.json."""
+    return resolve_config_path(str(Path(recipes_dir).parent / SYNC_STATE_FILENAME))
+
+
 def entry_value(entry, key: str):
     """Valeur de configuration effective : `options` (modifié via l'UI) prioritaire sur `data`."""
     return entry.options.get(key, entry.data.get(key))

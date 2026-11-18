@@ -35,8 +35,9 @@ from .const import (
     groups_file_for,
     recipes_dir_for_entry,
     scenes_dir_for,
+    sync_state_file_for,
 )
-from .groups import GroupDef, load_groups, sync_group_registries
+from .groups import GroupDef, load_groups, load_sync_state, save_sync_state, sync_group_registries
 from .phs16ctl.controller import (
     DEFAULT_CURRENT_MA,
     CardResult,
@@ -112,6 +113,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.groups: dict[str, GroupDef] = {}
         #: récap de la dernière synchro des registres (labels/areas) — exposé en diagnostics
         self.group_registry_sync: dict[str, Any] = {}
+        #: état persisté de la synchro (valeurs appliquées) — anti-conflit avec l'UI
+        self.sync_state: dict[str, Any] = {}
+        self.sync_state_path = sync_state_file_for(recipes_dir_for_entry(entry))
         self._io_lock = asyncio.Lock()
 
     async def async_io(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -132,18 +136,26 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             link=self.link,
             spots={a: SpotState(address=a, online=True) for a in addresses},
         )
+        self.sync_state = await self.async_io(load_sync_state, self.sync_state_path)
         await self._async_reload_groups()
 
     async def _async_reload_groups(self) -> None:
-        """Recharge groups.json (executor) et resynchronise labels/areas des registres."""
+        """Recharge groups.json (executor) et resynchronise labels/areas des registres.
+
+        La synchro n'écrase jamais une valeur modifiée manuellement dans l'UI :
+        elle ne réécrit que ce qu'elle a elle-même posé (état persisté) et
+        inchangé depuis. Les devices des SPOT pouvant apparaître après ce
+        coordinator, on resynchronise à chaque polling (no-op si rien à changer).
+        """
         path = groups_file_for(recipes_dir_for_entry(self.entry))
         groups = await self.async_io(load_groups, path)
         if groups != self.groups:
             _LOGGER.info("Groupes PHS16-LC rechargés depuis %s : %s", path, sorted(groups))
         self.groups = groups
-        # synchro additive des registres (no-op si rien à changer) ; devices des SPOT
-        # pouvant apparaître après ce coordinator, on resynchronise à chaque polling
-        self.group_registry_sync = sync_group_registries(self.hass, self.entry, self.groups)
+        result = sync_group_registries(self.hass, self.entry, self.groups, self.sync_state)
+        self.group_registry_sync = result.recap
+        if result.dirty:
+            await self.async_io(save_sync_state, self.sync_state_path, self.sync_state)
 
     async def _async_update_data(self) -> Phs16Data:
         await self._async_reload_groups()

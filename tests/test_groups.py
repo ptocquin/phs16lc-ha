@@ -251,6 +251,75 @@ async def test_registry_sync_is_additive_and_idempotent(
     assert perso.label_id in spot.labels
 
 
+async def test_manual_ui_edits_are_respected_not_reverted(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bugfix : la synchro des registres ne doit pas réécraser les modifications
+    manuelles (pièce du luminaire, étiquette, couleur) au prochain polling."""
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    dreg = dr.async_get(hass)
+    lreg = lr.async_get(hass)
+    areg = ar.async_get(hass)
+    spot1 = dreg.async_get_device_by_identifier((DOMAIN, "spot_1"), entry.entry_id)
+    label = lreg.async_get_label_by_name("serre_1_nord")
+    other_area = areg.async_create(name="cave")
+
+    # l'utilisateur modifie dans l'UI : pièce de SPOT 1, label retiré, couleur du label
+    dreg.async_update_device(spot1.id, area_id=other_area.id, labels=set())
+    lreg.async_update(label.label_id, color="#123456")
+
+    # deux cycles de polling : rien ne doit revenir en arrière
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    spot1 = dreg.async_get_device_by_identifier((DOMAIN, "spot_1"), entry.entry_id)
+    label = lreg.async_get_label_by_name("serre_1_nord")
+    assert spot1.area_id == other_area.id  # pièce modifiée conservée
+    assert label.label_id not in spot1.labels  # label retiré non ré-ajouté
+    assert label.color == "#123456"  # couleur modifiée conservée
+
+    # le device non touché (SPOT 2) garde bien label + area du groupe
+    spot2 = dreg.async_get_device_by_identifier((DOMAIN, "spot_2"), entry.entry_id)
+    area = areg.async_get_area_by_name("serre_1")
+    assert label.label_id in spot2.labels
+    assert spot2.area_id == area.id
+
+
+async def test_groups_change_propagates_when_devices_untouched(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Un changement de groups.json se propage bien (couleur, nouveau membre)
+    tant que l'utilisateur n'a rien modifié manuellement."""
+    bus = {1: FakeSpot(), 2: FakeSpot(), 3: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=3)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    groups = json.loads(json.dumps(GROUPS))
+    groups["serre_1_nord"]["color"] = "#00FF00"
+    groups["serre_1_nord"]["addresses"] = [1, 2, 3]  # nouveau membre
+    (tmp_path / "phs16lc" / "groups.json").write_text(json.dumps(groups), encoding="utf-8")
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    lreg = lr.async_get(hass)
+    dreg = dr.async_get(hass)
+    areg = ar.async_get(hass)
+    label = lreg.async_get_label_by_name("serre_1_nord")
+    assert label.color == "#00FF00"  # couleur propagée
+    spot3 = dreg.async_get_device_by_identifier((DOMAIN, "spot_3"), entry.entry_id)
+    area = areg.async_get_area_by_name("serre_1")
+    assert label.label_id in spot3.labels  # nouveau membre : label posé
+    assert spot3.area_id == area.id  # et area remplie (était vide)
+
+
 # ---------------------------------------------------------------------------
 # Entité light du groupe
 # ---------------------------------------------------------------------------

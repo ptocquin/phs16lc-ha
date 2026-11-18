@@ -4,6 +4,10 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.45 — 2026-11-18 — §6.8 : synchro des registres anti-conflit —
+> les modifs manuelles dans l'UI (pièce, étiquette, couleur) ne sont plus
+> écrasées à chaque polling (état persisté `.groups_sync_state.json`) ; bug
+> constaté en E2E et corrigé.
 > Version : 0.44 — 2026-11-18 — §6.8 : le device du groupe est aussi posé dans
 > l'area et porte le label coloré → la carte du groupe (lampe + select Recette +
 > bouton NVM) apparaît dans la vue de la pièce (retour E2E).
@@ -1227,6 +1231,12 @@ depuis l'exemple embarqué ; éditez-le ensuite directement dans la config HA) :
   du groupe (lampe + liste « Recette » + bouton « Sauvegarder NVM ») est
   directement visible, avec le badge coloré. Pour piloter toute la pièce d'un
   coup, définissez un groupe `<area>_all` contenant tous ses SPOT.
+- **Les modifications manuelles dans l'UI sont respectées** : la synchro ne
+  réécrit une pièce/étiquette/couleur que si elle est inchangée depuis ce que
+  l'intégration a elle-même posé (état persisté dans
+  `<config>/phs16lc/.groups_sync_state.json`) et ne remplit que les valeurs
+  vides. Changer la pièce d'un luminaire ou la couleur d'un label dans l'UI
+  n'est donc **pas** annulé au prochain polling.
 - Le fichier est **relu à chaque cycle de polling** : modifier `groups.json` prend
   effet en ≤ 10 s, sans redémarrer (les entités du nouveau groupe apparaissent
 > seules ; la synchro des labels/areas est additive — elle ne retire jamais un

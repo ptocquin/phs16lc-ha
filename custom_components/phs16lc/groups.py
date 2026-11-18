@@ -102,16 +102,50 @@ def load_groups(path: Path) -> dict[str, GroupDef]:
     return groups
 
 
+@dataclass
+class SyncResult:
+    """Résultat de la synchro des registres : récap (diagnostics) + indicateur dirty."""
+
+    recap: dict[str, Any]
+    dirty: bool  # True si `state` a été modifié -> à persister
+
+
+def load_sync_state(path: Path) -> dict[str, Any]:
+    """Charge l'état persisté de la synchro (labels/areas appliqués). Absent/illisible → {}."""
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except OSError, ValueError:
+        pass
+    return {}
+
+
+def save_sync_state(path: Path, state: dict[str, Any]) -> None:
+    """Persiste l'état de la synchro (écriture atomique). Exécuté en executor."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    tmp.replace(path)
+
+
 @callback
 def sync_group_registries(
-    hass: HomeAssistant, entry, groups: dict[str, GroupDef]
-) -> dict[str, Any]:
+    hass: HomeAssistant, entry, groups: dict[str, GroupDef], state: dict[str, Any]
+) -> SyncResult:
     """Pose label coloré + area sur les devices SPOT membres de chaque groupe **et
     sur le device du groupe lui-même** (pour que sa carte — lampe, liste
     « Recette », bouton NVM — apparaisse dans la vue de la pièce).
 
-    Additif : ne retire jamais rien. Retourne un récap {groupe: {label_id, area_id,
-    devices}} (utilisé par les diagnostics). À appeler sur le event loop.
+    **Règle anti-conflit** (bugfix : la synchro tournait à chaque polling et
+    écrasait les modifications manuelles de l'UI) : une valeur n'est (re)écrite
+    que si elle est **inchangée depuis notre dernier apply** (enregistré dans
+    `state`, persisté dans `.groups_sync_state.json`) ou si elle est **vide**.
+    Toute valeur modifiée manuellement dans l'UI (pièce, étiquette, couleur) est
+    respectée et n'est jamais réécrite. On ne retire jamais rien (additif).
+
+    `state` est muté ; appeler sur le event loop. Retourne le récap + dirty.
     """
     from homeassistant.helpers import area_registry as ar
     from homeassistant.helpers import device_registry as dr
@@ -122,11 +156,33 @@ def sync_group_registries(
     dreg = dr.async_get(hass)
 
     recap: dict[str, Any] = {}
+    dirty = False
     for gid, group in groups.items():
-        label = lreg.async_get_label_by_name(gid)
+        # --- label du groupe ---
+        lkey = f"label:{gid}"
+        rec = state.get(lkey)
+        label = lreg.async_get_label(rec.get("label_id")) if rec else None
+        if label is None:
+            label = lreg.async_get_label_by_name(gid)
         if label is None:
             label = lreg.async_create(name=gid, color=group.color, icon=group.icon)
-        else:
+            state[lkey] = {"label_id": label.label_id, "color": label.color, "icon": label.icon}
+            dirty = True
+        elif rec is None:
+            # label préexistant (ex. upgrade) : on enregistre tel quel, sans modifier
+            state[lkey] = {
+                "label_id": label.label_id,
+                "color": label.color,
+                "icon": label.icon,
+                "user": True,  # posé hors de notre synchro -> on ne touchera plus sa couleur
+            }
+            dirty = True
+        elif (
+            not rec.get("user")
+            and rec.get("color") == label.color
+            and rec.get("icon") == label.icon
+        ):
+            # inchangé depuis notre apply -> on propage le (nouveau) groups.json
             updates: dict[str, Any] = {}
             if group.color is not None and label.color != group.color:
                 updates["color"] = group.color
@@ -134,7 +190,11 @@ def sync_group_registries(
                 updates["icon"] = group.icon
             if updates:
                 label = lreg.async_update(label.label_id, **updates)
+                state[lkey] = {"label_id": label.label_id, "color": label.color, "icon": label.icon}
+                dirty = True
+        # else : label modifié manuellement (couleur/icône) -> respecté
 
+        # --- area ---
         area_id: str | None = None
         if group.area:
             area = areg.async_get_area_by_name(group.area)
@@ -142,44 +202,64 @@ def sync_group_registries(
                 area = areg.async_create(name=group.area)
             area_id = area.id
 
-        touched: list[int] = []
-        for address in group.addresses:
-            device = dreg.async_get_device_by_identifier(
-                (DOMAIN, f"spot_{address}"), entry.entry_id
-            )
-            if device is None:
-                continue  # carte pas encore découverte (rescan)
-            labels = set(device.labels) | {label.label_id}
-            kwargs: dict[str, Any] = {}
-            if labels != set(device.labels):
-                kwargs["labels"] = labels
-            if area_id is not None and device.area_id != area_id:
-                kwargs["area_id"] = area_id
-            if kwargs:
-                dreg.async_update_device(device.id, **kwargs)
-                touched.append(address)
-
-        # le device du groupe rejoint l'area et porte le label : dans la vue de la
-        # pièce, sa carte (light + select recette + bouton save) est directement visible
-        group_device_updated = False
-        gdev = dreg.async_get_device_by_identifier((DOMAIN, f"group_{gid}"), entry.entry_id)
-        if gdev is not None:
-            kwargs = {}
-            labels = set(gdev.labels) | {label.label_id}
-            if labels != set(gdev.labels):
-                kwargs["labels"] = labels
-            if area_id is not None and gdev.area_id != area_id:
-                kwargs["area_id"] = area_id
-            if kwargs:
-                dreg.async_update_device(gdev.id, **kwargs)
-                group_device_updated = True
+        # --- devices : SPOT membres + device du groupe ---
+        targets = [(f"spot_{a}", a) for a in group.addresses] + [(f"group_{gid}", None)]
+        touched: list[str] = []
+        for ident, _addr in targets:
+            dev = dreg.async_get_device_by_identifier((DOMAIN, ident), entry.entry_id)
+            if dev is None:
+                continue  # device pas encore créé (carte pas encore découverte)
+            dkey = f"device:{dev.id}"
+            rec = state.get(dkey)
+            cur_labels, cur_area = set(dev.labels), dev.area_id
+            if rec is None:
+                # première observation : on remplit les blancs (label manquant,
+                # area vide) et on enregistre l'état — sans jamais écraser une
+                # valeur préexistante posée manuellement
+                kwargs: dict[str, Any] = {}
+                new_labels = cur_labels | {label.label_id}
+                if new_labels != cur_labels:
+                    kwargs["labels"] = new_labels
+                new_area = cur_area
+                area_user = cur_area is not None
+                if area_id is not None and cur_area is None:
+                    kwargs["area_id"] = area_id
+                    new_area = area_id
+                    area_user = False
+                if kwargs:
+                    dreg.async_update_device(dev.id, **kwargs)
+                    touched.append(ident)
+                state[dkey] = {
+                    "labels": sorted(new_labels),
+                    "area_id": new_area,
+                    "area_user": area_user,  # area préexistante = posée par l'utilisateur
+                }
+                dirty = True
+            else:
+                rec_labels = set(rec.get("labels") or [])
+                rec_area = rec.get("area_id")
+                if rec_labels == cur_labels and rec_area == cur_area:
+                    # inchangé depuis notre apply -> on propage le nouveau groups.json
+                    kwargs = {}
+                    new_labels = cur_labels | {label.label_id}
+                    if new_labels != cur_labels:
+                        kwargs["labels"] = new_labels
+                    new_area = cur_area
+                    if area_id is not None and cur_area != area_id and not rec.get("area_user"):
+                        kwargs["area_id"] = area_id
+                        new_area = area_id
+                    if kwargs:
+                        dreg.async_update_device(dev.id, **kwargs)
+                        touched.append(ident)
+                        state[dkey] = {"labels": sorted(new_labels), "area_id": new_area}
+                        dirty = True
+                # else : device modifié manuellement dans l'UI -> respecté, non réécrit
 
         recap[gid] = {
             "name": group.name,
             "label_id": label.label_id,
             "label_color": label.color,
             "area_id": area_id,
-            "group_device_updated": group_device_updated,
             "devices_updated": touched,
         }
-    return recap
+    return SyncResult(recap=recap, dirty=dirty)
