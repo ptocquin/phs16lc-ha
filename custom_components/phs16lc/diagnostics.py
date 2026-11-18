@@ -6,12 +6,13 @@ courant + identité (@GI) + cartes LED (@GL) quand la carte est en ligne.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_RECIPES_DIR, DOMAIN, entry_value
+from .const import DOMAIN, recipes_dir_for_entry, scenes_dir_for
 from .coordinator import Phs16Coordinator
 from .phs16ctl import protocol as proto
 from .phs16ctl.link import T_GI, T_GL, available_ports
@@ -41,6 +42,28 @@ async def async_get_config_entry_diagnostics(
         return {"ports_detected": available_ports(), "spots": spots}
 
     collected = await coordinator.async_io(_collect)
+
+    def _fs_info() -> dict[str, Any]:
+        recipes_dir = recipes_dir_for_entry(entry)
+        scenes_dir = scenes_dir_for(recipes_dir)
+
+        def _count(d: Path) -> int:
+            try:
+                return len(list(d.glob("*.json"))) if d.is_dir() else 0
+            except OSError:
+                return 0
+
+        return {
+            "recipes_dir": {
+                "configured": str(entry.options.get("recipes_dir", entry.data.get("recipes_dir"))),
+                "resolved": str(recipes_dir),
+                "exists": recipes_dir.is_dir(),
+                "recipe_files": _count(recipes_dir),
+                "scenes_dir": str(scenes_dir),
+                "scene_files": _count(scenes_dir),
+            }
+        }
+
     return {
         "entry": {
             "title": entry.title,
@@ -53,6 +76,6 @@ async def async_get_config_entry_diagnostics(
             "rx_port": coordinator.link.rx_port,
             "single_port": coordinator.link.single_port,
         },
-        "recipes_dir": entry_value(entry, CONF_RECIPES_DIR),
+        **_fs_info(),
         **collected,
     }

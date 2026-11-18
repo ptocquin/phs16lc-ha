@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_RECIPES_DIR, DOMAIN, entry_value
+from .const import DOMAIN, recipes_dir_for_entry
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_spot_entities_listener
 from .phs16ctl.controller import LuminaireError, Recipe
@@ -51,7 +51,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: Phs16Coordinator = hass.data[DOMAIN][entry.entry_id]
-    recipes_dir = Path(str(entry_value(entry, CONF_RECIPES_DIR)))
+    recipes_dir = recipes_dir_for_entry(entry)
     add_spot_entities_listener(
         hass,
         entry,

@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_RX_PORT, DOMAIN
+from .const import CONF_RX_PORT, DOMAIN, recipes_dir_for_entry, scenes_dir_for
 from .coordinator import Phs16Coordinator
 from .entity import ensure_hub_device
 from .phs16ctl.link import PhsLink
@@ -92,6 +92,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     coordinator.hub_device_id = ensure_hub_device(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
+    _warn_if_recipes_dir_missing(entry)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)  # idempotent (plusieurs entrées = plusieurs bus)
@@ -99,6 +101,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     # Options modifiées dans l'UI -> recharge l'entrée (nouvel intervalle de polling, etc.)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+def _warn_if_recipes_dir_missing(entry: Phs16lcConfigEntry) -> None:
+    """Warn au setup si le dossier de recettes est introuvable (listes « Recette » vides).
+
+    HA OS 16+ monte la config en `/homeassistant` dans les add-ons mais en
+    `/config` dans le conteneur core : la copie se fait donc à
+    `<config>/phs16lc/recipes` = `/homeassistant/phs16lc/recipes` depuis l'add-on SSH.
+    """
+    recipes_dir = recipes_dir_for_entry(entry)
+    if not recipes_dir.is_dir():
+        _LOGGER.warning(
+            "Dossier de recettes introuvable : %s (scenes attendues dans %s). "
+            "Les listes \u00ab Recette \u00bb seront vides. Copier les *.json du d\u00e9p\u00f4t "
+            "(phs16ctl/recipes/, phs16ctl/scenes/) vers <config>/phs16lc/recipes et "
+            "<config>/phs16lc/scenes — depuis l'add-on SSH de HA OS 16+ : "
+            "/homeassistant/phs16lc/recipes et /homeassistant/phs16lc/scenes.",
+            recipes_dir,
+            scenes_dir_for(recipes_dir),
+        )
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> None:

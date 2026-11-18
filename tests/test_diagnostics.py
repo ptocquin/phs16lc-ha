@@ -33,11 +33,20 @@ async def test_diagnostics_collect_spot_info(
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
+    (tmp_path / "croissance.json").write_text("{}", encoding="utf-8")
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diag["link"]["port"] == "/dev/fake0"
     assert diag["entry"]["data"]["port"] == "/dev/fake0"
     assert "ports_detected" in diag
+
+    fs = diag["recipes_dir"]
+    assert fs["configured"] == str(tmp_path)
+    assert fs["resolved"] == str(tmp_path)
+    assert fs["exists"] is True
+    assert fs["recipe_files"] == 1
+    assert fs["scenes_dir"] == str(tmp_path.parent / "scenes")
+    assert fs["scene_files"] == 0  # dossier scenes absent → 0
 
     spot1 = diag["spots"]["1"]
     assert spot1["online"] is True

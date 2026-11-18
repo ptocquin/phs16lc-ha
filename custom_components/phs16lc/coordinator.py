@@ -16,7 +16,6 @@ import logging
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -25,13 +24,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     CONF_EXPECTED_SPOTS,
     CONF_POLL_INTERVAL,
-    CONF_RECIPES_DIR,
     DOMAIN,
     EVENT_RECIPE_APPLIED,
     EVENT_SAVED,
     EVENT_SCANNED,
     EVENT_SCENE_APPLIED,
     entry_value,
+    recipes_dir_for_entry,
     scenes_dir_for,
 )
 from .phs16ctl.controller import (
@@ -161,7 +160,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
         Tire l'événement `phs16lc_recipe_applied` (ok/erreur). Lève en cas d'échec.
         """
-        recipe_path = Path(str(entry_value(self.entry, CONF_RECIPES_DIR))) / recipe_name
+        recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
 
         def _do() -> None:
             recipe = Recipe.from_file(recipe_path)
@@ -208,7 +207,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def async_apply_scene(self, scene_name: str, save: bool = False) -> list[CardResult]:
         """Applique un fichier de scène (dossier `scenes/` à côté de `recipes_dir`)."""
-        scene_path = scenes_dir_for(str(entry_value(self.entry, CONF_RECIPES_DIR))) / scene_name
+        scene_path = scenes_dir_for(recipes_dir_for_entry(self.entry)) / scene_name
 
         def _do() -> tuple[Scene, list[CardResult]]:
             scene = Scene.from_file(scene_path)

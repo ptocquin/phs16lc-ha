@@ -4,6 +4,12 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.42 — 2026-11-18 — §5.4 : recettes/scènes NON embarquées dans
+> l'intégration → copie obligatoire dans `<config>/phs16lc/{recipes,scenes}` ;
+> HA OS 16+ monte la config en `/homeassistant` dans les add-ons (core toujours
+> `/config`) → résolution automatique `/config` ↔ `/homeassistant` dans le code,
+> warning au démarrage si dossier absent, et `recipes_dir` (configuré/résolu,
+> nb de fichiers) exposé dans les diagnostics.
 > Version : 0.41 — 2026-11-18 — mode boîtier dual (2× USB-RS485-WE) documenté :
 > §1/§2.2 deux montages (USB-RS422-WE seul + alim externe, ou boîtier dual TX/RX
 > avec alim 12–24 V intégrée), §3 CLI `--rx-port` / champ « Port série RX »,
@@ -1009,14 +1015,29 @@ Réglages → Appareils et services → **Ajouter une intégration** → cherche
 | Port série RX (optionnel) | vide par défaut | **Boîtier dual du fabricant (2× USB-RS485-WE)** uniquement : indiquez ici le second port série (réception, paire RX pins 7-8). Vide = un seul convertisseur full duplex (TX = RX). L'alimentation 12–24 V du bus est injectée par le boîtier |
 | Nombre de SPOT attendus | ex: `4` | Le scan s'arrête au premier silence ; ce réglage permet de détecter une carte HS au milieu de la ligne (équivalent `--expected` de la CLI) |
 | Intervalle de rafraîchissement | `10` s (5–60) | Le protocole ne pousse pas d'état : HA interroge les cartes (`@GP`, `@GT`) à cet intervalle |
-| Dossier des recettes | `/config/phs16lc/recipes` | Copier `../phs16ctl/recipes/*.json` et `../phs16ctl/scenes/*.json` à cet endroit |
+| Dossier des recettes | `/config/phs16lc/recipes` | **Les recettes/scènes ne sont PAS embarquées dans l'intégration** (HA ne charge que `custom_components/`) : il faut copier `../phs16ctl/recipes/*.json` et `../phs16ctl/scenes/*.json` à cet endroit (voir ci-dessous) |
 
 ```sh
-# Copier recettes et scènes dans la config HA (exemple, via Terminal & SSH)
-mkdir -p /config/phs16lc/recipes /config/phs16lc/scenes
-cp /chemin/du/depot/phs16ctl/recipes/*.json /config/phs16lc/recipes/
-cp /chemin/du/depot/phs16ctl/scenes/*.json  /config/phs16lc/scenes/
+# Copier recettes et scènes dans la config HA.
+# HA OS 16+ : dans l'add-on Terminal & SSH la config est montée en /homeassistant
+# (plus /config) ; le conteneur core, lui, la voit en /config — c'est le MÊME
+# dossier physique. L'intégration résout automatiquement /config ↔ /homeassistant.
+# Depuis l'add-on SSH (core-ssh) :
+mkdir -p /homeassistant/phs16lc/recipes /homeassistant/phs16lc/scenes
+# puis copier les fichiers (ex. scp depuis le Mac vers le dossier de la config,
+# ou via l'éditeur de fichiers de l'add-on) :
+#   phs16ctl/recipes/*.json  -> /homeassistant/phs16lc/recipes/
+#   phs16ctl/scenes/*.json   -> /homeassistant/phs16lc/scenes/
+# Sur un conteneur classique (chemin /config) : mêmes commandes avec /config/...
 ```
+
+> **Piège** : sans ces fichiers, les listes « Recette »/« Groupe » sont vides et
+> aucun bouton « Scène » n'apparaît — sans erreur. L'intégration logue un warning
+> au démarrage si le dossier est introuvable, et les diagnostics
+> (Réglages → Système → Réparations → Télécharger les diagnostics) indiquent
+> `recipes_dir` (configuré vs résolu, existence, nombre de fichiers). Les listes
+> se remplissent **sans redémarrer** : elles sont relues à chaque cycle de polling
+> (intervalle de rafraîchissement, 10 s par défaut) ou juste après « Scanner la ligne ».
 
 ### 5.5 Vérification de l'installation
 
