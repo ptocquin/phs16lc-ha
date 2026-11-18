@@ -34,6 +34,17 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from homeassistant.util import slugify
+except ImportError:  # exécution hors venv HA (slugify façon HA)
+    import re
+    import unicodedata
+
+    def slugify(text: str) -> str:
+        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+        return re.sub(r"[^a-z0-9_]+", "_", text.lower()).strip("_")
+
+
 HERE = Path(__file__).resolve().parent
 
 TEMP_KEYS = ("cpu", "led1", "led2")
@@ -83,6 +94,7 @@ def apply_groups_file(chambres: dict[str, dict], groups_path: Path) -> None:
     if isinstance(data, dict) and isinstance(data.get("groups"), dict):
         data = data["groups"]
     par_chambre: dict[str, dict[str, list[int]]] = {}
+    metas: dict[str, dict[str, dict]] = {}
     for gid, g in data.items():
         if not isinstance(g, dict):
             continue
@@ -95,8 +107,15 @@ def apply_groups_file(chambres: dict[str, dict], groups_path: Path) -> None:
             continue
         name = gid[len(area) + 1 :] if gid.startswith(area + "_") else gid
         par_chambre.setdefault(area, {})[name] = [int(a) for a in g.get("addresses") or []]
+        metas.setdefault(area, {})[name] = {
+            "gid": gid,
+            "name": str(g.get("name") or name),
+            "icon": g.get("icon"),
+            "color": g.get("color"),
+        }
     for ch, groupes in par_chambre.items():
         chambres[ch]["groupes"] = groupes
+        chambres[ch]["_groups_meta"] = metas.get(ch, {})
         print(f"INFO: chambre '{ch}' : {len(groupes)} groupe(s) depuis {groups_path.name}")
 
 
@@ -270,23 +289,54 @@ def gen_dashboard(chambres: dict[str, dict]) -> dict:
                 "la recette. On/off OK (la recette se réapplique), intensité = recette.",
             }
         ]
-        for g in cfg.get("groupes") or {}:
-            liste_cards.append(
-                {
-                    "type": "custom:auto-entities",
-                    "card": {"type": "entities", "title": f"Groupe {g}"},
-                    "filter": {"include": [{"domain": "light", "label": label(ch, g)}]},
-                    "sort": {"method": "name"},
-                }
-            )
-            liste_cards.append(
-                {
-                    "type": "tile",
-                    "entity": light_groupe(ch, g),
-                    "name": f"Groupe {g}",
-                    "features": [{"type": "light-brightness"}],
-                }
-            )
+        meta = cfg.get("_groups_meta") or {}
+        for g, addrs in (cfg.get("groupes") or {}).items():
+            m = meta.get(g)
+            if m is not None:
+                # v1.3.0 : entités natives du groupe (device « Groupe <name> ») —
+                # tout est inline sur la vue chambre, sans ouvrir de modal :
+                # tuile = lampe du groupe (slider luminosité), carte entities =
+                # select « Recette » + bouton NVM du groupe + toggles des SPOT membres
+                slug = slugify(m["name"])
+                liste_cards.append(
+                    {
+                        "type": "tile",
+                        "entity": f"light.{slug}",
+                        "name": m["name"],
+                        "icon": m.get("icon") or "mdi:lightbulb-group",
+                        "features": [{"type": "light-brightness"}],
+                        "tap_action": {"action": "more-info"},
+                    }
+                )
+                liste_cards.append(
+                    {
+                        "type": "entities",
+                        "title": f"{m['name']} — recette, NVM, membres",
+                        "entities": [
+                            {"entity": f"select.{slug}_recipe", "name": "Recette"},
+                            {"entity": f"button.{slug}_save_to_nvm", "name": "Sauvegarder NVM"},
+                            *[f"light.spot_{a}" for a in sorted(addrs, key=int)],
+                        ],
+                    }
+                )
+            else:
+                # mode mapping.yaml seul (rétrocompatible, sans groupes.json)
+                liste_cards.append(
+                    {
+                        "type": "custom:auto-entities",
+                        "card": {"type": "entities", "title": f"Groupe {g}"},
+                        "filter": {"include": [{"domain": "light", "label": label(ch, g)}]},
+                        "sort": {"method": "name"},
+                    }
+                )
+                liste_cards.append(
+                    {
+                        "type": "tile",
+                        "entity": light_groupe(ch, g),
+                        "name": f"Groupe {g}",
+                        "features": [{"type": "light-brightness"}],
+                    }
+                )
             liste_cards.append(
                 {
                     "type": "tile",

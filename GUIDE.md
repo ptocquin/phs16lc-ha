@@ -4,6 +4,10 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.46 — 2026-11-18 — §6.8/§6.9 : ergonomie UI — le modal « more-info »
+> d'une lampe n'est pas extensible par une intégration (frontend HA core) ; le
+> dashboard généré rend tout **inline** par groupe (tuile lampe + select Recette
+> + bouton NVM + toggles des membres, zéro modal) via les entités natives v1.3.0.
 > Version : 0.45 — 2026-11-18 — §6.8 : synchro des registres anti-conflit —
 > les modifs manuelles dans l'UI (pièce, étiquette, couleur) ne sont plus
 > écrasées à chaque polling (état persisté `.groups_sync_state.json`) ; bug
@@ -1269,6 +1273,24 @@ de luminaires » pour la photopériode d'un groupe via son schedule.
 > `groups.json` (`--groups`, ou `dashboards/groups.json` par défaut) : une seule
 > source de vérité pour les groupes, partagée entre l'intégration (runtime) et
 > les dashboards générés.
+
+### 6.9 Ergonomie de l'interface (modal « more-info » vs page appareil)
+
+- Cliquer sur une **entité lampe** (tile) ouvre le modal « more-info » : c'est le
+  frontend **HA core** qui le rend (on/off + slider) — une intégration custom ne
+  peut pas y ajouter de contrôles (recette, pièce…), il n'existe pas d'API pour ça.
+- La **page « Informations sur l'appareil »** (3 points → Informations sur
+  l'appareil, ou clic sur la *carte du device* / son nom dans la vue de la
+  pièce) regroupe toutes les entités du device : lampe, listes Recette/Groupe,
+  bouton NVM, capteurs… C'est la vue « riche » de core HA. Le **choix de la
+  pièce** (area) s'y trouve en haut, dans les réglages du device — jamais dans
+  un modal d'entité.
+- Pour éviter les modals, le **dashboard généré** (`dashboards/generated/
+  dashboard_culture.yaml`) affiche **tout en inline** dans la vue de chaque
+  chambre : par groupe, une tuile lampe (slider de luminosité) + une carte
+  entities avec le select « Recette » du groupe, le bouton « Sauvegarder NVM »
+  et les toggles de chaque SPOT membre. Sur le plan (picture-elements), un
+  clic sur un SPOT = toggle, appui long = more-info.
 
 ---
 
