@@ -106,7 +106,9 @@ def load_groups(path: Path) -> dict[str, GroupDef]:
 def sync_group_registries(
     hass: HomeAssistant, entry, groups: dict[str, GroupDef]
 ) -> dict[str, Any]:
-    """Pose label coloré + area sur les devices SPOT membres de chaque groupe.
+    """Pose label coloré + area sur les devices SPOT membres de chaque groupe **et
+    sur le device du groupe lui-même** (pour que sa carte — lampe, liste
+    « Recette », bouton NVM — apparaisse dans la vue de la pièce).
 
     Additif : ne retire jamais rien. Retourne un récap {groupe: {label_id, area_id,
     devices}} (utilisé par les diagnostics). À appeler sur le event loop.
@@ -156,11 +158,28 @@ def sync_group_registries(
             if kwargs:
                 dreg.async_update_device(device.id, **kwargs)
                 touched.append(address)
+
+        # le device du groupe rejoint l'area et porte le label : dans la vue de la
+        # pièce, sa carte (light + select recette + bouton save) est directement visible
+        group_device_updated = False
+        gdev = dreg.async_get_device_by_identifier((DOMAIN, f"group_{gid}"), entry.entry_id)
+        if gdev is not None:
+            kwargs = {}
+            labels = set(gdev.labels) | {label.label_id}
+            if labels != set(gdev.labels):
+                kwargs["labels"] = labels
+            if area_id is not None and gdev.area_id != area_id:
+                kwargs["area_id"] = area_id
+            if kwargs:
+                dreg.async_update_device(gdev.id, **kwargs)
+                group_device_updated = True
+
         recap[gid] = {
             "name": group.name,
             "label_id": label.label_id,
             "label_color": label.color,
             "area_id": area_id,
+            "group_device_updated": group_device_updated,
             "devices_updated": touched,
         }
     return recap

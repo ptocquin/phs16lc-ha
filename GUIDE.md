@@ -4,6 +4,9 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.44 — 2026-11-18 — §6.8 : le device du groupe est aussi posé dans
+> l'area et porte le label coloré → la carte du groupe (lampe + select Recette +
+> bouton NVM) apparaît dans la vue de la pièce (retour E2E).
 > Version : 0.43 — 2026-11-18 — **groupes de luminaires** (v1.3.0) : `groups.json`
 > embarqué + copie auto au 1er boot, entités par groupe (light/select/bouton),
 > services `address: "group:<id>"`, labels HA colorés + areas auto posés sur les
@@ -1220,7 +1223,10 @@ depuis l'exemple embarqué ; éditez-le ensuite directement dans la config HA) :
   posé comme *label HA* sur le device de chaque membre (HA 2026.11 supporte la
   couleur des labels) → visible sur la carte de chaque luminaire du groupe.
 - `area` (optionnel) : crée l'area si absente et la pose sur les devices membres
-  → la pièce apparaît dans l'UI avec tous ses luminaires.
+  **et sur le device du groupe lui-même** → dans la **vue de la pièce**, la carte
+  du groupe (lampe + liste « Recette » + bouton « Sauvegarder NVM ») est
+  directement visible, avec le badge coloré. Pour piloter toute la pièce d'un
+  coup, définissez un groupe `<area>_all` contenant tous ses SPOT.
 - Le fichier est **relu à chaque cycle de polling** : modifier `groups.json` prend
   effet en ≤ 10 s, sans redémarrer (les entités du nouveau groupe apparaissent
 > seules ; la synchro des labels/areas est additive — elle ne retire jamais un

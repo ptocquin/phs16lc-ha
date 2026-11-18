@@ -54,23 +54,13 @@ def spot_device_info(hub_device_id: str, address: int) -> DeviceInfo:
     )
 
 
-def ensure_group_device(
-    hass: HomeAssistant, entry, group_id: str, name: str, hub_device_id: str
-) -> str:
-    """Crée (ou retrouve) le device d'un groupe de luminaires, relié au hub. Retourne son id."""
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, f"group_{group_id}")},
-        via_device_id=hub_device_id,
-        name=name,
-        manufacturer="Twin Development sa",
-        model="Groupe de luminaires PHS16-LC",
-    )
-    return device.id
-
-
 def group_device_info(entry_id: str, group_id: str, hub_device_id: str, name: str) -> DeviceInfo:
-    """Device d'un groupe de luminaires (mêmes identifiants que `ensure_group_device`)."""
+    """Device d'un groupe de luminaires, relié au hub via `via_device_id`.
+
+    Le device est créé par HA à l'ajout de la première entité portant ce
+    DeviceInfo (identifiants `(DOMAIN, "group_<id>")`) ; l'area et le label du
+    groupe y sont posés par `groups.sync_group_registries`.
+    """
     return DeviceInfo(
         identifiers={(DOMAIN, f"group_{group_id}")},
         via_device_id=hub_device_id,

@@ -220,6 +220,13 @@ async def test_labels_and_area_applied_to_member_devices(
         assert label.label_id in spot.labels
         assert spot.area_id == area.id
 
+    # le device du groupe rejoint aussi l'area et porte le label : sa carte
+    # (light + select recette + bouton save) apparaît dans la vue de la pièce
+    gdev = dreg.async_get_device_by_identifier((DOMAIN, "group_serre_1_nord"), entry.entry_id)
+    assert gdev is not None
+    assert label.label_id in gdev.labels
+    assert gdev.area_id == area.id
+
 
 async def test_registry_sync_is_additive_and_idempotent(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
