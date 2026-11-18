@@ -17,6 +17,7 @@ from .const import (
     CONF_EXPECTED_SPOTS,
     CONF_POLL_INTERVAL,
     CONF_RECIPES_DIR,
+    CONF_RX_PORT,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECIPES_DIR,
     DOMAIN,
@@ -46,9 +47,13 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
         """Étape unique : port série + réglages de polling/dossier recettes."""
         if user_input is not None:
             port = str(user_input[CONF_PORT]).strip()
+            rx_port = str(user_input.get(CONF_RX_PORT) or "").strip()
+            if rx_port == port:
+                rx_port = ""  # identique au port TX => montage à un seul port
             await self.async_set_unique_id(port)
             self._abort_if_unique_id_configured()
-            return self.async_create_entry(title=f"PHS16-LC {port}", data=user_input)
+            data = {**user_input, CONF_PORT: port, CONF_RX_PORT: rx_port}
+            return self.async_create_entry(title=f"PHS16-LC {port}", data=data)
 
         ports = await self.hass.async_add_executor_job(_detected_ports)
         schema = vol.Schema(
@@ -63,6 +68,9 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
+                # Montage dual (boîtier fabricant 2x USB-RS485-WE) : port TX ci-dessus,
+                # port RX ici. Vide = un seul convertisseur full duplex (TX = RX).
+                vol.Optional(CONF_RX_PORT, default=""): str,
                 vol.Required(CONF_EXPECTED_SPOTS, default=0): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=1_000_000)
                 ),

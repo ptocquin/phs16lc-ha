@@ -11,6 +11,8 @@ from .phs16ctl.protocol import CURRENT_MAX_MA, CURRENT_MIN_MA
 DOMAIN = "phs16lc"
 
 # Clés de configuration (en plus de CONF_PORT = "port")
+# Port série de réception, montage dual (boîtier 2x USB-RS485-WE) ; vide = aucun
+CONF_RX_PORT = "rx_port"
 CONF_EXPECTED_SPOTS = "expected_spots"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_RECIPES_DIR = "recipes_dir"

@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import CONF_RX_PORT, DOMAIN
 from .coordinator import Phs16Coordinator
 from .entity import ensure_hub_device
 from .phs16ctl.link import PhsLink
@@ -73,13 +73,20 @@ def _install_blueprints(dest_root: Path) -> int:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> bool:
-    """Ouvre le port série (executor), crée le coordinator, premier scan, charge les plateformes."""
+    """Ouvre le port série (executor), crée le coordinator, premier scan, charge les plateformes.
+
+    `rx_port` (optionnel) : montage dual — boîtier fabricant avec deux convertisseurs
+    half duplex USB-RS485-WE, un sur la paire TX (pins 1-2), un sur la paire RX
+    (pins 7-8). Vide ou identique au port TX => un seul convertisseur full duplex.
+    """
     port = entry.data[CONF_PORT]
+    rx_port = str(entry.data.get(CONF_RX_PORT) or "").strip() or None
     try:
-        link = await hass.async_add_executor_job(PhsLink, port)
+        link = await hass.async_add_executor_job(PhsLink, port, rx_port)
     except Exception as exc:
         # Port absent ou déjà ouvert (ex: CLI phs16ctl en parallèle) -> retry auto
-        raise ConfigEntryNotReady(f"Port série {port} indisponible : {exc}") from exc
+        which = port if not rx_port else f"{port} (TX) / {rx_port} (RX)"
+        raise ConfigEntryNotReady(f"Port série {which} indisponible : {exc}") from exc
 
     coordinator = Phs16Coordinator(hass, entry, link)
     coordinator.hub_device_id = ensure_hub_device(hass, entry)

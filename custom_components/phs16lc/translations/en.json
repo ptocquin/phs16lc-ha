@@ -8,13 +8,15 @@
           "port": "Serial port",
           "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence)",
           "poll_interval": "Polling interval (seconds, 5-60)",
-          "recipes_dir": "Recipe folder (JSON)"
+          "recipes_dir": "Recipe folder (JSON)",
+          "rx_port": "RX serial port (optional — dual box with 2x USB-RS485-WE)"
         },
         "data_description": {
           "port": "Linux: /dev/ttyUSB0 (or /dev/phs16bus with a udev rule). macOS (dev): /dev/cu.usbserial-XXXX.",
           "expected_spots": "Set the total number of luminaires to detect a failed card in the middle of the line.",
           "poll_interval": "The PHS16-LC protocol has no push: currents and temperatures are re-read at this interval.",
-          "recipes_dir": "Copy the recipes/*.json files from the project there; they feed the \"Recipe\" dropdowns."
+          "recipes_dir": "Copy the recipes/*.json files from the project there; they feed the \"Recipe\" dropdowns.",
+          "rx_port": "Leave empty for a single full-duplex converter (TX = RX). With the manufacturer dual box: TX port in \"Serial port\", RX port here."
         }
       }
     },
@@ -37,22 +39,42 @@
   },
   "entity": {
     "binary_sensor": {
-      "spot_online": { "name": "Online" }
+      "spot_online": {
+        "name": "Online"
+      }
     },
     "select": {
-      "recipe": { "name": "Recipe" },
-      "group": { "name": "Group" }
+      "recipe": {
+        "name": "Recipe"
+      },
+      "group": {
+        "name": "Group"
+      }
     },
     "button": {
-      "save_nvm": { "name": "Save to NVM" },
-      "scan": { "name": "Scan the line" }
+      "save_nvm": {
+        "name": "Save to NVM"
+      },
+      "scan": {
+        "name": "Scan the line"
+      }
     },
     "sensor": {
-      "temp_cpu": { "name": "CPU temperature" },
-      "temp_led1": { "name": "LED board 1 temperature" },
-      "temp_led2": { "name": "LED board 2 temperature" },
-      "currents": { "name": "Currents" },
-      "line_status": { "name": "Cards online" }
+      "temp_cpu": {
+        "name": "CPU temperature"
+      },
+      "temp_led1": {
+        "name": "LED board 1 temperature"
+      },
+      "temp_led2": {
+        "name": "LED board 2 temperature"
+      },
+      "currents": {
+        "name": "Currents"
+      },
+      "line_status": {
+        "name": "Cards online"
+      }
     }
   },
   "services": {
@@ -64,41 +86,74 @@
       "name": "Apply a recipe",
       "description": "Applies a lighting recipe to one card (or to all with address=all).",
       "fields": {
-        "address": { "name": "Address", "description": "Card number (e.g. \"1\") or \"all\"." },
-        "recipe": { "name": "Recipe", "description": "JSON file name (e.g. \"croissance.json\")." },
-        "group": { "name": "Group", "description": "Optional: apply only this channel group (partial application)." }
+        "address": {
+          "name": "Address",
+          "description": "Card number (e.g. \"1\") or \"all\"."
+        },
+        "recipe": {
+          "name": "Recipe",
+          "description": "JSON file name (e.g. \"croissance.json\")."
+        },
+        "group": {
+          "name": "Group",
+          "description": "Optional: apply only this channel group (partial application)."
+        }
       }
     },
     "apply_scene": {
       "name": "Apply a scene",
       "description": "Applies a scene file to several cards at once.",
       "fields": {
-        "file": { "name": "Scene file", "description": "File name in the scenes folder (e.g. \"serre.json\")." },
-        "save": { "name": "Save to NVM", "description": "Sends @WP after each card (makes currents permanent)." }
+        "file": {
+          "name": "Scene file",
+          "description": "File name in the scenes folder (e.g. \"serre.json\")."
+        },
+        "save": {
+          "name": "Save to NVM",
+          "description": "Sends @WP after each card (makes currents permanent)."
+        }
       }
     },
     "save": {
       "name": "Save to NVM",
       "description": "Makes the card's current channel currents permanent in non-volatile memory (@WP).",
       "fields": {
-        "address": { "name": "Address", "description": "Card number (e.g. \"1\")." }
+        "address": {
+          "name": "Address",
+          "description": "Card number (e.g. \"1\")."
+        }
       }
     },
     "set_channels": {
       "name": "Set channels",
       "description": "Sets each channel individually (16 values in mA, 0 = off, 74-2150 mA).",
       "fields": {
-        "address": { "name": "Address", "description": "Card number." },
-        "currents": { "name": "Currents (mA)", "description": "16 values separated by spaces or commas (e.g. \"800 800 0 0 ...\")." }
+        "address": {
+          "name": "Address",
+          "description": "Card number."
+        },
+        "currents": {
+          "name": "Currents (mA)",
+          "description": "16 values separated by spaces or commas (e.g. \"800 800 0 0 ...\")."
+        }
       }
     },
     "set_channel": {
       "name": "Set one channel",
       "description": "Sets a single channel of a card.",
       "fields": {
-        "address": { "name": "Address", "description": "Card number." },
-        "channel": { "name": "Channel", "description": "Channel number (1-16)." },
-        "ma": { "name": "Current (mA)", "description": "0 = off, 74-2150 mA." }
+        "address": {
+          "name": "Address",
+          "description": "Card number."
+        },
+        "channel": {
+          "name": "Channel",
+          "description": "Channel number (1-16)."
+        },
+        "ma": {
+          "name": "Current (mA)",
+          "description": "0 = off, 74-2150 mA."
+        }
       }
     }
   }

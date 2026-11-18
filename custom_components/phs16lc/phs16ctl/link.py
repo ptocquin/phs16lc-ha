@@ -1,9 +1,21 @@
-"""Transport serie RS-485 vers le reseau de SPOT.
+"""Transport serie RS-485 full duplex vers le reseau de SPOT.
 
 Le PC est maitre : chaque commande est emise puis on attend au plus `timeout`
 secondes une reponse terminee par <CR>.  L'absence de reponse n'est pas une
 erreur -- c'est un element du protocole (fin d'enumeration, SPOT deja
 programme, ...), d'ou le retour `None` plutot qu'une exception.
+
+La ligne est full duplex (deux paires differentielles A/B).  Deux cablages :
+
+- **un seul convertisseur** USB/RS-422 (ex. FTDI USB-RS422-WE) : les deux
+  paires passent par un unique port serie, emission et reception partagent
+  ce port ;
+- **deux convertisseurs** half duplex (ex. boitier fabricant avec deux
+  USB-RS485-WE) : un port pour la paire d'emission (TX), un autre pour la
+  paire de reception (RX).
+
+`PhsLink` gere les deux : on lui passe un port d'emission et un port de
+reception, identiques ou distincts.  Le reste du programme est indifferent.
 """
 
 from __future__ import annotations
@@ -40,28 +52,61 @@ def available_ports() -> list[tuple[str, str]]:
 
 
 class PhsLink:
-    """Lien serie 115200 8N1 vers la ligne de SPOT."""
+    """Lien serie 115200 8N1 full duplex vers la ligne de SPOT.
+
+    `tx_port` porte l'emission, `rx_port` la reception.  Les deux peuvent etre
+    le meme peripherique (un seul convertisseur full duplex) ou deux
+    peripheriques distincts (un convertisseur half duplex par paire A/B).
+    """
 
     def __init__(
         self,
-        port: str,
+        tx_port: str,
+        rx_port: str | None = None,
         baudrate: int = BAUDRATE,
         trace: Callable[[str], None] | None = None,
     ) -> None:
-        self.port = port
+        rx_port = rx_port if rx_port is not None else tx_port
+        self.tx_port = tx_port
+        self.rx_port = rx_port
         self.trace = trace
-        self._serial = serial.Serial(
-            port=port,
+        self._tx = serial.Serial(
+            port=tx_port,
             baudrate=baudrate,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
             timeout=0,
         )
+        if rx_port == tx_port:
+            # Un seul convertisseur full duplex : le meme port lit et ecrit.
+            self._rx = self._tx
+        else:
+            self._rx = serial.Serial(
+                port=rx_port,
+                baudrate=baudrate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0,
+            )
+
+    @property
+    def single_port(self) -> bool:
+        """Vrai si emission et reception partagent le meme peripherique."""
+        return self._rx is self._tx
+
+    @property
+    def port(self) -> str:
+        """Port d'emission (compat. ascendante : `PhsLink(port).port`)."""
+        return self.tx_port
 
     def close(self) -> None:
-        if self._serial.is_open:
-            self._serial.close()
+        if self._tx.is_open:
+            self._tx.close()
+        # `_rx is _tx` en montage a un port : ne pas fermer deux fois.
+        if self._rx is not self._tx and self._rx.is_open:
+            self._rx.close()
 
     def __enter__(self) -> "PhsLink":
         return self
@@ -76,9 +121,11 @@ class PhsLink:
         (@GO du bootloader) : la trame est emise et la fonction rend la main.
         """
         frame = build_frame(cmd, addr, params)
-        self._serial.reset_input_buffer()
-        self._serial.write(frame)
-        self._serial.flush()
+        # Purge du tampon de reception avant emission : c'est le port RX qui
+        # recoit (en montage a un port, c'est le meme objet que le TX).
+        self._rx.reset_input_buffer()
+        self._tx.write(frame)
+        self._tx.flush()
         if self.trace:
             self.trace(f"TX {frame!r}")
         if timeout <= 0:
@@ -106,8 +153,8 @@ class PhsLink:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
-            self._serial.timeout = remaining
-            chunk = self._serial.read_until(CR, size=512)
+            self._rx.timeout = remaining
+            chunk = self._rx.read_until(CR, size=512)
             if chunk:
                 buffer += chunk
                 if CR in buffer:

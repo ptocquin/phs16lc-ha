@@ -47,7 +47,12 @@ async def async_get_config_entry_diagnostics(
             "data": dict(entry.data),
             "options": dict(entry.options),
         },
-        "link": {"port": coordinator.link.port},
+        "link": {
+            "port": coordinator.link.port,
+            "tx_port": coordinator.link.tx_port,
+            "rx_port": coordinator.link.rx_port,
+            "single_port": coordinator.link.single_port,
+        },
         "recipes_dir": entry_value(entry, CONF_RECIPES_DIR),
         **collected,
     }

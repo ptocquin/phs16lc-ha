@@ -53,3 +53,24 @@ async def test_diagnostics_collect_spot_info(
     spot2 = diag["spots"]["2"]
     assert spot2["online"] is False
     assert "identity" not in spot2  # pas de @GI/@GL sur carte muette
+
+
+async def test_diagnostics_reports_dual_ports(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Montage dual : les diagnostics exposent tx_port et rx_port."""
+    FakePhsLink.reset({1: FakeSpot()})
+    monkeypatch.setattr("custom_components.phs16lc.PhsLink", FakePhsLink)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**FLOW_DATA, "rx_port": "/dev/fake1", "recipes_dir": str(tmp_path)}
+    )
+    await hass.async_block_till_done()
+    entry = result["result"]
+    assert entry.state == ConfigEntryState.LOADED
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["link"]["port"] == "/dev/fake0"
+    assert diag["link"]["tx_port"] == "/dev/fake0"
+    assert diag["link"]["rx_port"] == "/dev/fake1"
+    assert diag["link"]["single_port"] is False

@@ -223,19 +223,26 @@ class Luminaire:
 def scan_line(link: PhsLink, expected: int = 0) -> list[int]:
     """Énumère les adresses présentes sur la ligne (1, 2, 3, ...).
 
-    S'arrête au premier silence, sauf si `expected` > 0 : dans ce cas,
-    poursuit jusqu'à `expected` et signale les adresses muettes.
-    Retourne la liste des adresses qui répondent.
+    Par défaut (`expected=0`) : s'arrête au premier silence, considéré comme
+    la fin de la ligne. Avec `expected > 0` : balaye toutes les adresses
+    1..`expected` même si les premières sont muettes (ex. une seule carte
+    programmée à l'adresse 2, l'adresse 1 étant vide), et retourne celles
+    qui répondent.
     """
     found: list[int] = []
     address = 1
     while True:
         resp = link.send("GI", address, timeout=T_GI)
         if resp is None:
-            if address == 1 or address > expected:
-                break
-            address += 1
-            continue
+            if expected > 0:
+                # Balayage 1..expected : un silence n'arrête pas le scan,
+                # même à l'adresse 1 (carte programmée à une adresse > 1).
+                if address > expected:
+                    break
+                address += 1
+                continue
+            # expected == 0 : le premier silence est la fin de la ligne.
+            break
         found.append(address)
         address += 1
     return found

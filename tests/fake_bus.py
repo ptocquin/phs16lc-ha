@@ -17,13 +17,18 @@ class FakeSpot:
 
 
 class FakePhsLink:
-    """Imite `PhsLink` : même constructeur (port, baudrate, trace), `send()`, `close()`."""
+    """Imite `PhsLink` : même constructeur (tx_port, rx_port=None, baudrate, trace)."""
 
     instances: list[FakePhsLink] = []
     bus: dict[int, FakeSpot] = {}
 
-    def __init__(self, port: str, baudrate: int = 115200, trace=None) -> None:
-        self.port = port
+    def __init__(
+        self, tx_port: str, rx_port: str | None = None, baudrate: int = 115200, trace=None
+    ) -> None:
+        self.tx_port = tx_port
+        self.rx_port = rx_port if rx_port else tx_port
+        self.port = tx_port  # compat. ascendante (diagnostics)
+        self.single_port = self.rx_port == self.tx_port
         self.closed = False
         self.sent: list[tuple[str, int, str]] = []
         FakePhsLink.instances.append(self)
