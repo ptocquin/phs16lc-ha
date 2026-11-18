@@ -4,6 +4,11 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.41 — 2026-11-18 — mode boîtier dual (2× USB-RS485-WE) documenté :
+> §1/§2.2 deux montages (USB-RS422-WE seul + alim externe, ou boîtier dual TX/RX
+> avec alim 12–24 V intégrée), §3 CLI `--rx-port` / champ « Port série RX »,
+> §4–§5 déploiement (udev double, `--device` ×2 en conteneur), §7 dépannage
+> (alim 12–24 V sur pins 3/6=+, 4/5=masse, ordre TX/RX, paires 1-2 ↔ 7-8).
 > Version : 0.40 — 2026-11-13 — §4.2.1 : DHCP encore en 10.18.x + ARP 10.16.52.1
 > INCOMPLETE = le port switch n'est PAS encore sur le VLAN 10.16.52 → vérifier la
 > prise physique (scv-pvg-svr06) et demander à l'IT de confirmer l'activation ;
@@ -112,7 +117,8 @@ l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance
 > Version : 0.1 — 2026-11-11 — état : installation/usage prévus, intégration en
 > cours de développement (voir [`PLAN.md`](PLAN.md)).
 > Le protocole et le câblage du bus sont détaillés dans [`../GUIDE.md`](../GUIDE.md)
-> (adaptateur USB-RS422, pinout RJ45, sertissage) et [`../README.md`](../README.md).
+> (adaptateur USB-RS422-WE seul, ou boîtier dual 2× USB-RS485-WE ; pinout RJ45
+> + alim 12–24 V ; sertissage) et [`../README.md`](../README.md).
 
 ---
 
@@ -122,10 +128,15 @@ L'intégration `phs16lc` fait le lien entre Home Assistant et le bus RS-485
 des luminaires PHS16-LC :
 
 ```
-Appli mobile / navigateur ──► Home Assistant ──► intégration phs16lc ──► /dev/ttyUSB0
+Appli mobile / navigateur ──► Home Assistant ──► intégration phs16lc ──► port TX (/dev/ttyUSB0)
                                                                     │  (pyserial, cœur = phs16ctl)
+                                                                    │  boîtier dual : + port RX (/dev/ttyUSB1)
                                                                     ▼
-                                              FTDI USB-RS422-WE ──► bus RS-485 ──► SPOT 1..N
+              ┌─ montage A : 1× FTDI USB-RS422-WE (full duplex) + alim 12–24 V externe
+              └─ montage B : boîtier fabricant 2× USB-RS485-WE (TX + RX), alim 12–24 V intégrée
+                                                                    │
+                                                                    ▼
+                                              bus RS-485 sur RJ45 ──► SPOT 1..N
         ▲
         └── accès à distance via le VPN de l'entreprise (aucun port ouvert, pas de cloud)
 ```
@@ -218,15 +229,43 @@ Points communs : alimentation stable (mini UPS/ondulineur advised si coupures
 fréquentes — les `@SP` sont volatils, seule la NVM (`@WP`) survit à une coupure),
 câble Ethernet, accès au réseau de l'entreprise (IP fixe ou DHCP réservé conseillé).
 
-### 2.2 Adaptateur USB → RS-422 (full duplex, obligatoire)
+### 2.2 Câblage du bus (RJ45 + alim 12–24 V) et adaptateur(s) USB
+
+**Pinout RJ45 du bus** (confirmé par le concepteur P. Jenard, email du
+2026-11-18 — détail et sertissage dans [`../GUIDE.md`](../GUIDE.md) §1.2) :
+
+| Pins RJ45 | Signal |
+| --- | --- |
+| 1-2 (paire orange) | RS-485 montante : données **PC → SPOT** (A+ / B−) |
+| 7-8 (paire marron) | RS-485 descendante : réponses **SPOT → PC** (A+ / B−) |
+| 3 et 6 (paire verte) | **+12..24 V** (alimentation de la ligne série) |
+| 4 et 5 (paire bleue) | **masse** de cette alimentation |
+
+L'**alimentation 12–24 V sur le RJ45 est obligatoire** : l'alim des LED est
+isolée galvaniquement de celle de la ligne série, et l'interface de
+communication du luminaire est alimentée par le bus. Sans elle, le luminaire
+ne répond à rien (scan vide).
+
+Deux montages possibles côté PC :
+
+| | **Montage A — un seul adaptateur** | **Montage B — boîtier dual du fabricant** |
+| --- | --- | --- |
+| Matériel | 1× **FTDI USB-RS422-WE-1800-BT** (full duplex 4 fils, datasheet `../0900766b80da71a2.pdf`) | 2× **FTDI USB-RS485-WE-1800-BT** (half duplex) + boîtier d'interface du fabricant (schéma fourni par email le 2026-11-18 ; soft de référence : `light-monitor-dual/`) |
+| Câblage | fils nus sur RJ45 : orange=TXD+→pin 1, rouge=TXD−→pin 2, jaune=RXD+→pin 7, blanc=RXD−→pin 8, noir=GND→pins 4/5 | câble **TX** : orange (Data+ A)→pin 1, jaune (Data− B)→pin 2 ; câble **RX** : orange→pin 7, jaune→pin 8 |
+| Alimentation | alim **externe 12–24 V** : + → pins 3/6, − → pins 4/5 | injectée **par le boîtier** (+ pins 3/6, masse 4/5) |
+| Ports série vus | **1** (`/dev/ttyUSB0`, `/dev/cu.usbserial-XXXX`) | **2** : TX et RX (un par câble) |
+| Config HA | champ « Port série » seul | « Port série » = TX, **« Port série RX »** = RX |
+| CLI | `phs16ctl --port P …` | `phs16ctl --port P_TX --rx-port P_RX …` |
+
+> Ne **pas** utiliser un seul câble USB-RS485-WE (half duplex 2 fils) : il
+> faut soit le USB-RS422-WE (montage A), soit **deux** USB-RS485-WE via le
+> boîtier (montage B).
 
 | Élément | Détail |
 | --- | --- |
-| Modèle retenu | **FTDI USB-RS422-WE-1800-BT** (datasheet `../0900766b80da71a2.pdf`) |
-| Pourquoi | Le bus PHS16-LC est en **RS-485 full duplex 4 fils** (TX+, TX−, RX+, RX−). Ne **pas** utiliser le câble USB-RS485-WE (half-duplex 2 fils). |
-| Côté bus | 9 fils nus (5 utiles) : orange=TXD+, rouge=TXD−, jaune=RXD+, blanc=RXD−, noir=GND. **Alim 12–24 V obligatoire sur le bus RJ45** : + sur pins 3/6, masse sur pins 4/5 (pinout confirmé par le concepteur, voir GUIDE racine §1.2) |
-| Côté PC | `/dev/ttyUSB0` sous Linux, pilote noyau `ftdi_sio` inclus, rien à installer |
-| Détection | `ls /dev/ttyUSB*` ou, une fois l'intégration installée, la liste proposée dans le formulaire de configuration |
+| Côté PC (Linux) | `/dev/ttyUSB0`, pilote noyau `ftdi_sio` inclus, rien à installer ; port rendu stable par udev (§7) |
+| Côté PC (macOS) | pilote FTDI VCP à installer (§3.1) → `/dev/cu.usbserial-XXXX` (préfixe `cu.`) |
+| Détection | `ls /dev/ttyUSB*` / `ls /dev/cu.usbserial*`, ou la liste proposée dans le formulaire de configuration |
 
 Câblage du bus (pinout RJ45 T568B, sertissage, terminaison 100 Ω, topologie
 linéaire) : voir [`../GUIDE.md`](../GUIDE.md) §1.2 — ne pas réinventer ici.
@@ -236,9 +275,9 @@ linéaire) : voir [`../GUIDE.md`](../GUIDE.md) §1.2 — ne pas réinventer ici.
 - [ ] Mini-PC N100 16 Go + SSD 256 Go (ou Raspberry Pi 5 8 Go + SSD USB/NVMe)
 - [ ] SSD USB 120 Go+ pour le **Pi 3B+ de tests préliminaires** (§4) — le Pi 3B+ lui-même est déjà en stock
 - [ ] Câble Ethernet (branchement au réseau entreprise)
-- [ ] Adaptateur **FTDI USB-RS422-WE-1800-BT** (full duplex 4 fils)
+- [ ] **Montage A** : adaptateur **FTDI USB-RS422-WE-1800-BT** (full duplex, 1 port) + **alim externe 12–24 V** — **OU** **montage B** : boîtier fabricant avec **2× USB-RS485-WE-1800-BT** (2 ports TX + RX, alim 12–24 V intégrée au boîtier)
 - [ ] Câble bus Cat5e/Cat6a/Cat7 + connecteurs RJ45 blindés (voir GUIDE racine §1.2)
-- [ ] Alimentation **12–24 V** injectée sur le bus RJ45 — boîtier fabricant (2× USB-RS485-WE) ou alim externe (+ sur pins 3/6, masse sur 4/5). **Obligatoire** : sans elle, l'interface série du luminaire est muette (scan vide)
+- [ ] Alimentation **12–24 V sur le bus RJ45** (pins 3/6 = +, 4/5 = masse). **Obligatoire** : sans elle, l'interface série du luminaire est muette (scan vide). En montage A, alim externe ; en montage B, fournie par le boîtier
 - [ ] (Optionnel) petit onduleur (UPS) pour éviter les coupures de courant
 
 ---
@@ -260,8 +299,11 @@ le PC Linux est décrit au §5 : **aucun changement de code** n'est nécessaire
   *Réglages Système → Confidentialité et sécurité*, redémarrer. Le câble
   USB-RS422-WE apparaît alors en `/dev/cu.usbserial-XXXX` (préfixe `cu.`, pas
   `tty.` ; vérifier avec `ls /dev/cu.usbserial*`). Voir `../README.md` §7.2.
-- Brancher l'adaptateur USB-RS422-WE et le bus des luminaires (câblage : §2.2
-  et `../GUIDE.md` §1.2).
+  En montage boîtier dual, **deux** ports apparaissent (un par câble
+  USB-RS485-WE) : repérer lequel est le TX via `ls -l /dev/serial/by-id/`
+  (le nom contient le n° de série du câble, câblé sur les pins 1-2).
+- Brancher l'adaptateur (USB-RS422-WE, ou les deux câbles du boîtier dual) et
+  le bus des luminaires (câblage : §2.2 et `../GUIDE.md` §1.2).
 
 ### 3.2 Tester le backend `phs16ctl` seul (sans Home Assistant)
 
@@ -273,6 +315,10 @@ uv run phs16ctl --list-ports                         # doit lister /dev/cu.usbse
 uv run phs16ctl --port /dev/cu.usbserial-XXXX scan   # vrais luminaires
 uv run phs16ctl --port /dev/cu.usbserial-XXXX on 1 800
 uv run phs16ctl --port /dev/cu.usbserial-XXXX status 1
+# carte programmée à une adresse > 1 (l'adresse 1 est muette) :
+uv run phs16ctl --port /dev/cu.usbserial-XXXX scan --expected 33
+# boîtier dual (2 ports : TX + RX) :
+uv run phs16ctl --port /dev/cu.usbserial-TX --rx-port /dev/cu.usbserial-RX scan --expected 33
 ```
 
 Sans luminaire (simulateur sur port pty) :
@@ -313,7 +359,8 @@ ln -s "$PWD/custom_components/phs16lc" ~/.hass_dev/custom_components/phs16lc   #
 ```
 
 - Ajouter l'intégration **PHS16-LC** dans l'UI (Réglages → Appareils et services)
-  avec le port `/dev/cu.usbserial-XXXX`.
+  avec le port `/dev/cu.usbserial-XXXX`. En boîtier dual, renseigner aussi
+  **« Port série RX »** avec le second port.
 - Le symlink rend le code du dépôt **live** : après chaque modification,
   redémarrer `hass` (Ctrl-C puis relancer) pour recharger l'intégration.
 - **Pourquoi pas de conteneur sur le Mac** : le passthrough USB des ports série
@@ -355,6 +402,8 @@ curl -s -X POST http://localhost:8123/api/config/config_entries/flow/<flow_id> \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"port":"/tmp/phs_pty","expected_spots":3,"poll_interval":5,"recipes_dir":"/Users/ptocquin/.hass_dev/phs16lc/recipes"}'
 #    → create_entry avec state "loaded"
+#    (champ "rx_port" optionnel : vide = mono-port ; pour tester le mode dual
+#     sans matériel, light-monitor-dual/tools/fake_spot.py --split fournit DEUX pty)
 
 # 6. Scénario E2E (exemples) :
 curl -s -X POST http://localhost:8123/api/services/light/turn_on \
@@ -462,7 +511,7 @@ sudo reboot   # attendre ~10 s, éteindre, retirer la SD
 Puis flasher l'image HA OS **directement sur le SSD USB** — dans Raspberry Pi
 Imager v2.0.12 : *Home Assistant OS → Raspberry Pi 3 64-bit (HA OS 18.5)* — ou
 avec Balena Etcher / `dd` — et démarrer avec SSD + Ethernet + adaptateur
-USB-RS422-WE branchés.
+USB-RS422-WE (ou les deux câbles du boîtier dual) branchés.
 
 ### 4.2 Premier démarrage et installation de l'intégration
 
@@ -470,8 +519,9 @@ USB-RS422-WE branchés.
    N100), puis ouvrir `http://homeassistant.local:8123` et faire l'onboarding
    (compte administrateur).
 2. Installer l'add-on **Terminal & SSH** (Boutique) pour le dépannage.
-3. Rendre le port série stable (sinon `/dev/ttyUSB0` peut devenir `ttyUSB1` après
-   un reboot) : règle udev du **§7** → le port apparaîtra comme `/dev/phs16bus`.
+3. Rendre le(s) port(s) série stable(s) (sinon `/dev/ttyUSB0` peut devenir
+   `ttyUSB1` après un reboot) : règle udev du **§7** → `/dev/phs16bus`, plus
+   `/dev/phs16rx` en boîtier dual (deux câbles FTDI = deux ports).
 4. Déployer l'intégration exactement comme sur la cible finale : les méthodes du
    **§5.3** s'appliquent telles quelles (un Pi en HA OS a aussi un `/config`) :
 
@@ -485,6 +535,7 @@ USB-RS422-WE branchés.
    port `/dev/phs16bus`, le nombre de SPOT attendus, l'intervalle de
    rafraîchissement et le dossier des recettes `/config/phs16lc/recipes`
    (copier les JSON de `phs16ctl/recipes/` et `phs16ctl/scenes/`, voir §5.4).
+   En boîtier dual, renseigner en plus **« Port série RX » = `/dev/phs16rx`**.
 
 #### 4.2.1 Réseau après le premier boot (réseau d'entreprise en DHCP)
 
@@ -871,13 +922,15 @@ sudo docker run -d \
   -e TZ=Europe/Paris \
   -v /path/to/config-ha:/config \
   --device /dev/ttyUSB0:/dev/ttyUSB0 \
+  --device /dev/ttyUSB1:/dev/ttyUSB1 \   # boîtier dual uniquement (port RX)
   --network=host \
   ghcr.io/home-assistant/home-assistant:stable
 ```
 
 - `--device /dev/ttyUSB0` : passe l'adaptateur USB-RS422 au conteneur
   (vérifier le port avec `ls /dev/ttyUSB*` ; le rendre stable via une règle udev
-  sur le numéro de série FTDI, voir §7).
+  sur le numéro de série FTDI, voir §7). En boîtier dual, passer **les deux**
+  ports : `--device /dev/phs16bus:/dev/phs16bus --device /dev/phs16rx:/dev/phs16rx`.
 - Premier accès : `http://<ip-du-mini-pc>:8123`, onboarding idem.
 
 ### 5.3 Installer l'intégration `phs16lc`
@@ -1101,10 +1154,11 @@ Disponibles dans Outils de développement → Services :
 ### 6.7 Coexistence avec la CLI `phs16ctl`
 
 La CLI (`../phs16ctl/`) et l'intégration HA **ne doivent pas tourner en même
-temps sur le même port série** (`/dev/ttyUSB0` ne s'ouvre qu'une fois).
-Pour intervenir en CLI : retirer temporairement l'intégration
-(Réglages → Appareils et services → PHS16-LC → Supprimer), ou utiliser un
-autre port/adaptateur.
+temps sur le même port série** (`/dev/ttyUSB0` ne s'ouvre qu'une fois ; en
+boîtier dual : les deux ports TX et RX). Pour intervenir en CLI :
+`phs16ctl --port /dev/phs16bus --rx-port /dev/phs16rx …`, après avoir retiré
+temporairement l'intégration (Réglages → Appareils et services → PHS16-LC →
+Supprimer), ou utiliser un autre port/adaptateur.
 
 ---
 
@@ -1114,11 +1168,11 @@ autre port/adaptateur.
 | --- | --- | --- |
 | Aucune entité après l'ajout de l'intégration | Dossier mal copié / pas de redémarrage | Vérifier `/config/custom_components/phs16lc/manifest.json`, redémarrer HA, voir les logs (Réglages → Système → Journaux) |
 | « Impossible d'ouvrir le port » | Mauvais port, ou port déjà utilisé (CLI lancée en parallèle) | Choisir le bon port dans les options de l'intégration ; arrêter la CLI |
-| `scan` trouve 0 carte | Croisement TX/RX, mauvais port | Voir [`../GUIDE.md`](../GUIDE.md) §6 (inverser paires 1-2 ↔ 4-5 côté adaptateur) |
+| `scan` trouve 0 carte | Alim 12–24 V absente du bus, mauvais port, ordre TX/RX inversé (dual) | Mesurer 12–24 V entre pins 3/6 (+) et 4/5 (masse) à la prise RJ45 du luminaire ; en boîtier dual, TX = port câblé sur pins 1-2, RX = pins 7-8 ; voir [`../GUIDE.md`](../GUIDE.md) §6 (inverser paires 1-2 ↔ 7-8) |
 | Carte « hors ligne » au milieu de la ligne | Trou dans le bus : le scan s'arrête au 1er silence | Renseigner « nombre de SPOT attendus » dans les options de l'intégration |
 | Changements perdus après coupure de courant | `@SP` volatile, pas de `@WP` | Bouton « Sauvegarder NVM », ou option `save: true` des services |
 | NAK 5 (checksum) | Parasites, bus long non terminé | Terminaison 100 Ω en bout de ligne (GUIDE racine §1.2) |
-| Conteneur Docker : port absent | `--device` manquant | Relancer avec `--device /dev/ttyUSB0:/dev/ttyUSB0` ; rendre le port stable par règle udev (ID_SERIAL FTDI) |
+| Conteneur Docker : port absent | `--device` manquant | Relancer avec `--device /dev/ttyUSB0:/dev/ttyUSB0` (en boîtier dual : les **deux** ports, `--device` ×2) ; rendre le port stable par règle udev (ID_SERIAL FTDI) |
 | `curl http://<ip>:8123` → `000` depuis un poste du LAN | Mauvaise IP, sous-réseau/VLAN différent, VPN actif, isolement client Wi-Fi, ou ACL réseau (DROP) | Côté Pi (console) : `ha network info`, `ss -tlnp \| grep 8123` (attendu `0.0.0.0:8123`), `curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8123` (attendu 200/302). Côté poste : `netstat -rn \| grep <ip>`, `ping <ip>`, `nc -zv <ip> 8123`. Timeout = DROP → demander l'ACL TCP/8123 à l'IT ; ping KO → vérifier IP/VLAN/VPN ; Wi-Fi d'entreprise = souvent isolement client → poste filaire ou VPN |
 | Lenteurs d'affichage | Polling trop fréquent | Augmenter l'intervalle de rafraîchissement dans les options (max 60 s) |
 | Pas de `/dev/cu.usbserial-*` sur le Mac (macOS ≥ 26.6) | Pilote FTDI VCP non installé ou extension non validée | Installer le pilote VCP (ftdichip.com) + valider dans *Réglages Système → Confidentialité et sécurité*, redémarrer (`../README.md` §7.2) |
@@ -1130,8 +1184,14 @@ Rendre le port série stable (udev) :
 
 ```sh
 # /etc/udev/rules.d/99-phs16.rules
+# montage A (un seul adaptateur) :
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="phs16bus"
 # → le port apparaîtra toujours comme /dev/phs16bus
+# montage B (boîtier dual, deux câbles) : un symlink par n° de série du câble
+# (n° lu via : ls -l /dev/serial/by-id/) :
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ENV{ID_SERIAL_SHORT}=="FTXXXXXXX", SYMLINK+="phs16tx"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ENV{ID_SERIAL_SHORT}=="FTYYYYYYY", SYMLINK+="phs16rx"
+# → /dev/phs16tx (câble sur pins 1-2) et /dev/phs16rx (câble sur pins 7-8)
 ```
 
 ---
@@ -1150,7 +1210,8 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="p
   prochain rafraîchissement.
 - Une entité `light` = intensité **uniforme** sur les 16 canaux ; les réglages
   par groupe passent par les listes « Recette/Groupe » ou les services.
-- Un seul bus (un port série) par instance de l'intégration ; plusieurs bus
-  = plusieurs entrées de configuration (prévu, à confirmer en phase 1).
+- Un seul bus par instance de l'intégration ; plusieurs bus = plusieurs
+  entrées de configuration. En boîtier dual, une entrée ouvre **deux** ports
+  série (TX + RX) — ne pas inverser leurs rôles dans le formulaire.
 - L'instance HA tournant en venv sur le MacBook Pro (§3.4) est un environnement
   de **développement** : la production tourne sur le PC Linux dédié (§5).
