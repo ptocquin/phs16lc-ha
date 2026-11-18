@@ -17,14 +17,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, brightness_to_ma, ma_to_brightness
+from .const import DEFAULT_CHANNELS, DOMAIN, brightness_to_ma, ma_to_brightness
 from .coordinator import Phs16Coordinator
-from .entity import Phs16Entity
+from .entity import Phs16Entity, add_group_entities_listener, group_device_info
 from .phs16ctl.controller import DEFAULT_CURRENT_MA, LuminaireError
 from .phs16ctl.protocol import CURRENT_MIN_MA
-
-DEFAULT_CHANNELS = 16
 
 
 async def async_setup_entry(
@@ -32,7 +31,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Une lampe par SPOT connu, plus à chaque rescan."""
+    """Une lampe par SPOT connu, plus à chaque rescan ; une lampe par groupe (groups.json)."""
     coordinator: Phs16Coordinator = hass.data[DOMAIN][entry.entry_id]
     known: set[int] = set()
 
@@ -50,6 +49,14 @@ async def async_setup_entry(
 
     _add_new_spots()
     entry.async_on_unload(coordinator.async_add_listener(_add_new_spots))
+
+    add_group_entities_listener(
+        hass,
+        entry,
+        coordinator,
+        async_add_entities,
+        lambda group_id: GroupLight(coordinator, entry, group_id),
+    )
 
 
 class SpotLight(Phs16Entity, LightEntity):
@@ -109,3 +116,76 @@ class SpotLight(Phs16Entity, LightEntity):
             await self.coordinator.async_set_channels(self.address, [0] * self._channels())
         except LuminaireError as exc:
             raise HomeAssistantError(f"SPOT {self.address} : {exc}") from exc
+
+
+class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
+    """Lampe d'un groupe de luminaires (phase 10) : on/off + luminosité sur tous les membres.
+
+    Entité principale du device « Groupe <name> » (`name=None`). `turn_on` sans
+    luminosité réapplique la dernière recette de chaque membre (D11), sinon 500 mA.
+    """
+
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+    _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_name = None  # l'entité porte le nom du device groupe
+
+    def __init__(self, coordinator: Phs16Coordinator, entry: ConfigEntry, group_id: str) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        group = coordinator.groups.get(group_id)
+        name = group.name if group is not None else group_id
+        self._attr_device_info = group_device_info(
+            entry.entry_id, group_id, coordinator.hub_device_id, name
+        )
+        self._attr_unique_id = f"{entry.entry_id}_group_{group_id}_light"
+
+    def _spots(self) -> list:
+        if self._group_id not in self.coordinator.groups:
+            return []
+        return [
+            spot
+            for address in self.coordinator.group_addresses(self._group_id)
+            if (spot := self.coordinator.data.spots.get(address)) is not None
+        ]
+
+    @property
+    def available(self) -> bool:
+        return self._group_id in self.coordinator.groups and super().available
+
+    @property
+    def is_on(self) -> bool | None:
+        spots = self._spots()
+        if not spots:
+            return None
+        return any(
+            s.online and s.currents and any(c >= CURRENT_MIN_MA for c in s.currents) for s in spots
+        )
+
+    @property
+    def brightness(self) -> int | None:
+        spots = [s for s in self._spots() if s.online and s.currents]
+        if not spots:
+            return None
+        return ma_to_brightness(max(max(s.currents) for s in spots))
+
+    async def _run_group(self, coro) -> None:
+        try:
+            results = await coro
+        except KeyError as exc:
+            raise HomeAssistantError(f"Groupe {self._group_id} inconnu (groups.json)") from exc
+        errors = {a: e for a, e in results.items() if e}
+        if errors:
+            raise HomeAssistantError(
+                f"Groupe {self._group_id} : {len(errors)} carte(s) en erreur : {errors}"
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        if ATTR_BRIGHTNESS in kwargs:
+            ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]))
+            await self._run_group(self.coordinator.async_set_channels_group(self._group_id, ma))
+        else:
+            # D11 appliqué au groupe : dernière recette de chaque membre, sinon 500 mA
+            await self._run_group(self.coordinator.async_restore_group(self._group_id))
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._run_group(self.coordinator.async_set_channels_group(self._group_id, 0))

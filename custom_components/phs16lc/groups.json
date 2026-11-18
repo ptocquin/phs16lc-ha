@@ -1,0 +1,23 @@
+{
+  "serre_1_nord": {
+    "name": "Serre 1 — Nord",
+    "color": "#4CAF50",
+    "icon": "mdi:leaf",
+    "area": "serre_1",
+    "addresses": [1, 2, 3, 4]
+  },
+  "serre_1_sud": {
+    "name": "Serre 1 — Sud",
+    "color": "#8BC34A",
+    "icon": "mdi:sprout",
+    "area": "serre_1",
+    "addresses": [5, 6, 7]
+  },
+  "serre_2_all": {
+    "name": "Serre 2 — Tous",
+    "color": "#03A9F4",
+    "icon": "mdi:lightbulb-group",
+    "area": "serre_2",
+    "addresses": [8, 9, 10]
+  }
+}

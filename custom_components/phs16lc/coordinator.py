@@ -24,16 +24,21 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     CONF_EXPECTED_SPOTS,
     CONF_POLL_INTERVAL,
+    DEFAULT_CHANNELS,
     DOMAIN,
+    EVENT_GROUP_RECIPE_APPLIED,
     EVENT_RECIPE_APPLIED,
     EVENT_SAVED,
     EVENT_SCANNED,
     EVENT_SCENE_APPLIED,
     entry_value,
+    groups_file_for,
     recipes_dir_for_entry,
     scenes_dir_for,
 )
+from .groups import GroupDef, load_groups, sync_group_registries
 from .phs16ctl.controller import (
+    DEFAULT_CURRENT_MA,
     CardResult,
     Luminaire,
     LuminaireError,
@@ -103,6 +108,10 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.link = link
         #: id registry du device hub, renseigné par `async_setup_entry` (entity.ensure_hub_device)
         self.hub_device_id: str = ""
+        #: groupes de luminaires chargés depuis groups.json (rechargés à chaque polling, D20)
+        self.groups: dict[str, GroupDef] = {}
+        #: récap de la dernière synchro des registres (labels/areas) — exposé en diagnostics
+        self.group_registry_sync: dict[str, Any] = {}
         self._io_lock = asyncio.Lock()
 
     async def async_io(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -123,8 +132,21 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             link=self.link,
             spots={a: SpotState(address=a, online=True) for a in addresses},
         )
+        await self._async_reload_groups()
+
+    async def _async_reload_groups(self) -> None:
+        """Recharge groups.json (executor) et resynchronise labels/areas des registres."""
+        path = groups_file_for(recipes_dir_for_entry(self.entry))
+        groups = await self.async_io(load_groups, path)
+        if groups != self.groups:
+            _LOGGER.info("Groupes PHS16-LC rechargés depuis %s : %s", path, sorted(groups))
+        self.groups = groups
+        # synchro additive des registres (no-op si rien à changer) ; devices des SPOT
+        # pouvant apparaître après ce coordinator, on resynchronise à chaque polling
+        self.group_registry_sync = sync_group_registries(self.hass, self.entry, self.groups)
 
     async def _async_update_data(self) -> Phs16Data:
+        await self._async_reload_groups()
         await self.async_io(_poll_spots, self.link, self.data.spots)
         return self.data
 
@@ -231,5 +253,190 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             },
         )
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
+        return results
+
+    # ------------------------------------------------------------------
+    # Groupes de luminaires (phase 10, D20/D22)
+    # ------------------------------------------------------------------
+    def group_addresses(self, group_id: str) -> list[int]:
+        """Adresses déclarées du groupe. Lève KeyError si le groupe est inconnu."""
+        group = self.groups.get(group_id)
+        if group is None:
+            raise KeyError(group_id)
+        return list(group.addresses)
+
+    def _member_channels(self, address: int) -> int:
+        spot = self.data.spots.get(address)
+        if spot is not None and spot.currents:
+            return len(spot.currents)
+        return DEFAULT_CHANNELS
+
+    async def async_apply_recipe_to_group(
+        self, group_id: str, recipe_name: str, group: str | None = None
+    ) -> dict[int, str | None]:
+        """Applique une recette à toutes les cartes du groupe (une passe série, un refresh).
+
+        Retourne {address: erreur_ou_None} ; un membre en erreur n'interrompt pas les
+        autres (comme apply_scene). Tire `phs16lc_recipe_applied` par membre + le
+        récapitulatif `phs16lc_group_recipe_applied`. Lève OSError/ValueError si la
+        recette est illisible, KeyError si le groupe est inconnu.
+        """
+        addresses = self.group_addresses(group_id)
+        recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
+
+        def _do() -> dict[int, str | None]:
+            recipe = Recipe.from_file(recipe_path)  # lève OSError/ValueError -> propagate
+            results: dict[int, str | None] = {}
+            for address in addresses:
+                lum = Luminaire(
+                    address=address, link=self.link, channels=self._member_channels(address)
+                )
+                try:
+                    lum.apply_recipe(recipe, group=group)
+                    results[address] = None
+                except LuminaireError as exc:
+                    results[address] = str(exc)
+            return results
+
+        results = await self.async_io(_do)
+        for address, error in results.items():
+            spot = self.data.spots.get(address)
+            if error is None and group is None and spot is not None:
+                spot.last_recipe = recipe_name
+            self.hass.bus.async_fire(
+                EVENT_RECIPE_APPLIED,
+                {
+                    "address": address,
+                    "recipe": recipe_name,
+                    "group": group,
+                    "group_id": group_id,
+                    "ok": error is None,
+                    "error": error,
+                },
+            )
+        self.hass.bus.async_fire(
+            EVENT_GROUP_RECIPE_APPLIED,
+            {
+                "group": group_id,
+                "recipe": recipe_name,
+                "channel_group": group,
+                "ok": sum(1 for e in results.values() if e is None),
+                "errors": sum(1 for e in results.values() if e is not None),
+                "results": {str(a): e for a, e in results.items()},
+            },
+        )
+        await self.async_refresh()
+        return results
+
+    async def async_save_group(self, group_id: str) -> dict[int, str | None]:
+        """@WP sur toutes les cartes du groupe. Retourne {address: erreur_ou_None}."""
+        addresses = self.group_addresses(group_id)
+
+        def _do() -> dict[int, str | None]:
+            results: dict[int, str | None] = {}
+            for address in addresses:
+                lum = Luminaire(address=address, link=self.link)
+                try:
+                    lum.save()
+                    results[address] = None
+                except LuminaireError as exc:
+                    results[address] = str(exc)
+            return results
+
+        results = await self.async_io(_do)
+        for address, error in results.items():
+            self.hass.bus.async_fire(
+                EVENT_SAVED,
+                {"address": address, "group_id": group_id, "ok": error is None, "error": error},
+            )
+        await self.async_refresh()
+        return results
+
+    async def async_set_channels_group(
+        self, group_id: str, currents: list[int] | int
+    ) -> dict[int, str | None]:
+        """Règle les canaux de toutes les cartes du groupe.
+
+        `currents` : liste de mA (même vecteur pour chaque carte) ou un entier mA
+        (vecteur uniforme [ma] x nb_canaux de la carte). Retourne {address: erreur}.
+        """
+        addresses = self.group_addresses(group_id)
+
+        def _do() -> dict[int, str | None]:
+            results: dict[int, str | None] = {}
+            for address in addresses:
+                n = self._member_channels(address)
+                vector = [currents] * n if isinstance(currents, int) else list(currents)
+                lum = Luminaire(address=address, link=self.link, channels=n)
+                try:
+                    if len(vector) != n:
+                        results[address] = f"{n} canaux attendus, {len(vector)} fournis"
+                    else:
+                        lum.set_channels(vector)
+                        results[address] = None
+                except LuminaireError as exc:
+                    results[address] = str(exc)
+            return results
+
+        results = await self.async_io(_do)
+        await self.async_refresh()
+        return results
+
+    async def async_set_channel_group(
+        self, group_id: str, channel: int, ma: int
+    ) -> dict[int, str | None]:
+        """Règle un canal sur toutes les cartes du groupe (patch du vecteur courant)."""
+        addresses = self.group_addresses(group_id)
+
+        def _do() -> dict[int, str | None]:
+            results: dict[int, str | None] = {}
+            for address in addresses:
+                spot = self.data.spots.get(address)
+                base = (
+                    list(spot.currents)
+                    if spot is not None and spot.currents
+                    else [0] * self._member_channels(address)
+                )
+                if not 1 <= channel <= len(base):
+                    results[address] = f"canal {channel} hors limites (1..{len(base)})"
+                    continue
+                base[channel - 1] = ma
+                lum = Luminaire(address=address, link=self.link, channels=len(base))
+                try:
+                    lum.set_channels(base)
+                    results[address] = None
+                except LuminaireError as exc:
+                    results[address] = str(exc)
+            return results
+
+        results = await self.async_io(_do)
+        await self.async_refresh()
+        return results
+
+    async def async_restore_group(self, group_id: str) -> dict[int, str | None]:
+        """`light.turn_on` sans luminosité appliqué au groupe (D11) : chaque membre
+        réapplique sa dernière recette, ou DEFAULT_CURRENT_MA si aucune."""
+        addresses = self.group_addresses(group_id)
+        recipes_dir = recipes_dir_for_entry(self.entry)
+
+        def _do() -> dict[int, str | None]:
+            results: dict[int, str | None] = {}
+            for address in addresses:
+                n = self._member_channels(address)
+                lum = Luminaire(address=address, link=self.link, channels=n)
+                spot = self.data.spots.get(address)
+                recipe_name = spot.last_recipe if spot is not None else None
+                try:
+                    if recipe_name:
+                        lum.apply_recipe(Recipe.from_file(recipes_dir / recipe_name))
+                    else:
+                        lum.set_channels([DEFAULT_CURRENT_MA] * n)
+                    results[address] = None
+                except (LuminaireError, OSError, ValueError, KeyError) as exc:
+                    results[address] = str(exc)
+            return results
+
+        results = await self.async_io(_do)
         await self.async_refresh()
         return results

@@ -4,6 +4,13 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.43 — 2026-11-18 — **groupes de luminaires** (v1.3.0) : `groups.json`
+> embarqué + copie auto au 1er boot, entités par groupe (light/select/bouton),
+> services `address: "group:<id>"`, labels HA colorés + areas auto posés sur les
+> devices membres (badges natifs), §6.8 ; §5.4 : recettes/scènes embarquées et
+> copiées auto (si absentes) vers `<config>/phs16lc/` → boutons « Scène » visibles
+> d'emblée ; générateur de dashboards lit `groups.json` (`--groups`) ; blueprint
+> « recette planifiée d'un groupe » ; 96 tests OK.
 > Version : 0.42 — 2026-11-18 — §5.4 : recettes/scènes NON embarquées dans
 > l'intégration → copie obligatoire dans `<config>/phs16lc/{recipes,scenes}` ;
 > HA OS 16+ monte la config en `/homeassistant` dans les add-ons (core toujours
@@ -1015,29 +1022,36 @@ Réglages → Appareils et services → **Ajouter une intégration** → cherche
 | Port série RX (optionnel) | vide par défaut | **Boîtier dual du fabricant (2× USB-RS485-WE)** uniquement : indiquez ici le second port série (réception, paire RX pins 7-8). Vide = un seul convertisseur full duplex (TX = RX). L'alimentation 12–24 V du bus est injectée par le boîtier |
 | Nombre de SPOT attendus | ex: `4` | Le scan s'arrête au premier silence ; ce réglage permet de détecter une carte HS au milieu de la ligne (équivalent `--expected` de la CLI) |
 | Intervalle de rafraîchissement | `10` s (5–60) | Le protocole ne pousse pas d'état : HA interroge les cartes (`@GP`, `@GT`) à cet intervalle |
-| Dossier des recettes | `/config/phs16lc/recipes` | **Les recettes/scènes ne sont PAS embarquées dans l'intégration** (HA ne charge que `custom_components/`) : il faut copier `../phs16ctl/recipes/*.json` et `../phs16ctl/scenes/*.json` à cet endroit (voir ci-dessous) |
+| Dossier des recettes | `/config/phs16lc/recipes` | Dossier par défaut. **Depuis la v1.3.0, recettes/scènes/groups sont embarquées dans l'intégration et copiées automatiquement** vers `<config>/phs16lc/{recipes,scenes,groups.json}` au premier démarrage (si absentes — jamais d'écrasement). Pour ajouter les vôtres : copiez vos `*.json` dans ce dossier (voir ci-dessous) |
 
 ```sh
-# Copier recettes et scènes dans la config HA.
+# Les recettes/scènes d'exemple (croissance, floraison, spectre, serre) et un
+# groups.json d'exemple sont embarqués dans l'intégration et copiés
+# AUTOMATIQUEMENT au premier démarrage vers <config>/phs16lc/ :
+#   custom_components/phs16lc/recipes/*.json  -> <config>/phs16lc/recipes/
+#   custom_components/phs16lc/scenes/*.json   -> <config>/phs16lc/scenes/
+#   custom_components/phs16lc/groups.json     -> <config>/phs16lc/groups.json
+# (copie « si absent » : vos fichiers existants ne sont jamais écrasés).
+#
 # HA OS 16+ : dans l'add-on Terminal & SSH la config est montée en /homeassistant
-# (plus /config) ; le conteneur core, lui, la voit en /config — c'est le MÊME
-# dossier physique. L'intégration résout automatiquement /config ↔ /homeassistant.
-# Depuis l'add-on SSH (core-ssh) :
-mkdir -p /homeassistant/phs16lc/recipes /homeassistant/phs16lc/scenes
-# puis copier les fichiers (ex. scp depuis le Mac vers le dossier de la config,
-# ou via l'éditeur de fichiers de l'add-on) :
-#   phs16ctl/recipes/*.json  -> /homeassistant/phs16lc/recipes/
-#   phs16ctl/scenes/*.json   -> /homeassistant/phs16lc/scenes/
-# Sur un conteneur classique (chemin /config) : mêmes commandes avec /config/...
+# (plus /config) ; le conteneur core la voit en /config — c'est le MÊME dossier
+# physique. L'intégration résout automatiquement /config ↔ /homeassistant.
+# Pour AJOUTER vos propres recettes/scènes/groupes : éditez directement
+#   /homeassistant/phs16lc/recipes/*.json      (depuis l'add-on SSH, HA OS 16+)
+#   /homeassistant/phs16lc/scenes/*.json
+#   /homeassistant/phs16lc/groups.json
+# ou /config/phs16lc/... sur un conteneur classique.
 ```
 
-> **Piège** : sans ces fichiers, les listes « Recette »/« Groupe » sont vides et
-> aucun bouton « Scène » n'apparaît — sans erreur. L'intégration logue un warning
-> au démarrage si le dossier est introuvable, et les diagnostics
-> (Réglages → Système → Réparations → Télécharger les diagnostics) indiquent
-> `recipes_dir` (configuré vs résolu, existence, nombre de fichiers). Les listes
-> se remplissent **sans redémarrer** : elles sont relues à chaque cycle de polling
-> (intervalle de rafraîchissement, 10 s par défaut) ou juste après « Scanner la ligne ».
+> **Listes vides / boutons « Scène » absents** : depuis la v1.3.0 les fichiers
+> par défaut sont copiés auto ; si le dossier a été supprimé ou si `recipes_dir`
+> est personnalisé et vide, les listes « Recette »/« Groupe » sont vides et aucun
+> bouton « Scène » n'apparaît — l'intégration logue un warning au démarrage, et
+> les diagnostics (Réglages → Système → Réparations → Télécharger les diagnostics)
+> indiquent `recipes_dir` et `groups_file` (configuré vs résolu, existence,
+> nombre de fichiers, groupes chargés). Les listes et groupes se remplissent
+> **sans redémarrer** : relus à chaque cycle de polling (10 s par défaut) ou juste
+> après « Scanner la ligne ».
 
 ### 5.5 Vérification de l'installation
 
@@ -1046,7 +1060,10 @@ mkdir -p /homeassistant/phs16lc/recipes /homeassistant/phs16lc/scenes
    (« SPOT 1 », « SPOT 2 »…) reliés au hub « Adaptateur PHS16-LC ».
 2. **Entités** : chaque SPOT a une lampe (`light`), deux listes déroulantes
    (recette / groupe), un bouton « Sauvegarder NVM », 3 capteurs de température,
-   un résumé des courants et un capteur de présence.
+   un résumé des courants et un capteur de présence. Chaque **groupe** de
+   `groups.json` a son device avec lampe + liste « Recette » + bouton
+   « Sauvegarder NVM » (§6.8), et chaque SPOT membre porte le **badge coloré**
+   (label) du groupe.
 3. **Test rapide** : allumer/éteindre la lampe « SPOT 1 » depuis le tableau de
    bord, vérifier que les vraies LED réagissent.
 4. Sans matériel, on peut valider tout le flux avec le simulateur :
@@ -1180,6 +1197,62 @@ boîtier dual : les deux ports TX et RX). Pour intervenir en CLI :
 `phs16ctl --port /dev/phs16bus --rx-port /dev/phs16rx …`, après avoir retiré
 temporairement l'intégration (Réglages → Appareils et services → PHS16-LC →
 Supprimer), ou utiliser un autre port/adaptateur.
+
+### 6.8 Groupes de luminaires (recette de groupe, badges tag + couleur)
+
+Depuis la **v1.3.0**, un **groupe de luminaires** (ex. une rangée d'une serre)
+est défini dans `<config>/phs16lc/groups.json` (copié auto au premier démarrage
+depuis l'exemple embarqué ; éditez-le ensuite directement dans la config HA) :
+
+```json
+{
+  "serre_1_nord": {
+    "name": "Serre 1 — Nord",
+    "color": "#4CAF50",
+    "icon": "mdi:leaf",
+    "area": "serre_1",
+    "addresses": [1, 2, 3, 4]
+  }
+}
+```
+
+- `addresses` : adresses des SPOT membres. `color` + `icon` : **badge coloré**
+  posé comme *label HA* sur le device de chaque membre (HA 2026.11 supporte la
+  couleur des labels) → visible sur la carte de chaque luminaire du groupe.
+- `area` (optionnel) : crée l'area si absente et la pose sur les devices membres
+  → la pièce apparaît dans l'UI avec tous ses luminaires.
+- Le fichier est **relu à chaque cycle de polling** : modifier `groups.json` prend
+  effet en ≤ 10 s, sans redémarrer (les entités du nouveau groupe apparaissent
+> seules ; la synchro des labels/areas est additive — elle ne retire jamais un
+> label posé à la main).
+
+**Entités créées par groupe** (device « Groupe <name> », relié au hub) :
+
+| Entité | Utilisation |
+| --- | --- |
+| `light.phs16lc_group_<id>` | On/off + luminosité appliqués à **tous les membres**. « On » sans curseur = dernière recette de chaque membre (D11), ou 500 mA si aucune. |
+| `select.phs16lc_group_<id>_recette` | Applique la recette choisie à **tous les membres** en une fois. |
+| `button.phs16lc_group_<id>_save` | « Sauvegarder NVM » (@WP) sur tous les membres. |
+
+**Services** : `address` accepte désormais `"group:<id>"` en plus de l'entier et
+`"all"` — ex. photopériode d'un groupe en une ligne :
+
+```yaml
+- service: phs16lc.apply_recipe
+  data:
+    address: "group:serre_1_nord"
+    recipe: croissance.json
+```
+
+Un membre en erreur n'interrompt pas les autres (événements
+`phs16lc_recipe_applied` par carte + récapitulatif `phs16lc_group_recipe_applied`
+dans le logbook). Blueprint embarqué « PHS16-LC — Recette planifiée d'un groupe
+de luminaires » pour la photopériode d'un groupe via son schedule.
+
+> Le générateur de dashboards (`dashboards/generate_dashboards.py`) lit le même
+> `groups.json` (`--groups`, ou `dashboards/groups.json` par défaut) : une seule
+> source de vérité pour les groupes, partagée entre l'intégration (runtime) et
+> les dashboards générés.
 
 ---
 

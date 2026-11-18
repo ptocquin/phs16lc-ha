@@ -1,0 +1,9 @@
+{
+  "name": "serre",
+  "description": "Carte 1 en croissance, carte 2 spectre rouge partiel, cartes 3-4 en floraison",
+  "targets": [
+    { "address": 1, "recipe": "croissance.json" },
+    { "address": 2, "recipe": "spectre.json", "group": "rouge" },
+    { "address": [3, 4], "recipe": "floraison.json" }
+  ]
+}

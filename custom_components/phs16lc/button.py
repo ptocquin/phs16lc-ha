@@ -14,7 +14,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, recipes_dir_for_entry, scenes_dir_for
 from .coordinator import Phs16Coordinator
-from .entity import Phs16Entity, add_spot_entities_listener, hub_device_info
+from .entity import (
+    Phs16Entity,
+    add_group_entities_listener,
+    add_spot_entities_listener,
+    group_device_info,
+    hub_device_info,
+)
 from .phs16ctl.controller import LuminaireError
 
 
@@ -43,6 +49,15 @@ async def async_setup_entry(
         coordinator,
         async_add_entities,
         lambda address: SpotSaveButton(coordinator, address),
+    )
+
+    # Bouton « Sauvegarder NVM » par groupe de luminaires (groups.json, phase 10)
+    add_group_entities_listener(
+        hass,
+        entry,
+        coordinator,
+        async_add_entities,
+        lambda group_id: GroupSaveButton(coordinator, entry, group_id),
     )
 
     # Boutons hub : scan + un bouton par fichier de scène
@@ -125,3 +140,35 @@ class SpotSaveButton(Phs16Entity, ButtonEntity):
             await self.coordinator.async_save(self.address)
         except LuminaireError as exc:
             raise HomeAssistantError(f"SPOT {self.address} : {exc}") from exc
+
+
+class GroupSaveButton(CoordinatorEntity[Phs16Coordinator], ButtonEntity):
+    """« Sauvegarder NVM » d'un groupe (phase 10) : @WP sur tous les membres."""
+
+    _attr_translation_key = "save_nvm"
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: Phs16Coordinator, entry: ConfigEntry, group_id: str) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        group = coordinator.groups.get(group_id)
+        name = group.name if group is not None else group_id
+        self._attr_device_info = group_device_info(
+            entry.entry_id, group_id, coordinator.hub_device_id, name
+        )
+        self._attr_unique_id = f"{entry.entry_id}_group_{group_id}_save"
+
+    @property
+    def available(self) -> bool:
+        return self._group_id in self.coordinator.groups and super().available
+
+    async def async_press(self) -> None:
+        try:
+            results = await self.coordinator.async_save_group(self._group_id)
+        except KeyError as exc:
+            raise HomeAssistantError(f"Groupe {self._group_id} inconnu (groups.json)") from exc
+        errors = {a: e for a, e in results.items() if e}
+        if errors:
+            raise HomeAssistantError(
+                f"Groupe {self._group_id} : {len(errors)} carte(s) en erreur : {errors}"
+            )

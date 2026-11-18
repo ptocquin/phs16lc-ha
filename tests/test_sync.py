@@ -31,6 +31,32 @@ def test_cli_not_vendored(root_dir: Path) -> None:
     )
 
 
+def test_embedded_recipes_scenes_match_phs16ctl(root_dir: Path) -> None:
+    """Les recettes/scènes embarquées (copiées vers <config>/phs16lc/ au boot)
+    doivent rester synchronisées avec phs16ctl/{recipes,scenes}."""
+    for name in ("recipes", "scenes"):
+        src_dir = root_dir.parent / "phs16ctl" / name
+        dst_dir = root_dir / "custom_components" / "phs16lc" / name
+        src_files = {p.name: p.read_bytes() for p in src_dir.glob("*.json")}
+        dst_files = {p.name: p.read_bytes() for p in dst_dir.glob("*.json")}
+        assert src_files, f"aucune source dans {src_dir}"
+        assert dst_files == src_files, (
+            f"{name}/ embarqué désynchronisé (lancer tools/sync_phs16ctl.py)"
+        )
+
+
+def test_embedded_groups_json_present(root_dir: Path) -> None:
+    """Un groups.json d'exemple est embarqué (copié vers <config>/phs16lc/ au boot)."""
+    import json
+
+    path = root_dir / "custom_components" / "phs16lc" / "groups.json"
+    assert path.is_file(), "groups.json embarqué absent"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    for gid, g in data.items():
+        assert g.get("addresses"), f"groupe {gid} sans adresses"
+
+
 def test_vendored_controller_importable_shape(root_dir: Path) -> None:
     """La copie vendored expose bien les API métier attendues (contrat avec phs16ctl)."""
     import ast

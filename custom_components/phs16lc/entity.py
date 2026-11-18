@@ -54,6 +54,32 @@ def spot_device_info(hub_device_id: str, address: int) -> DeviceInfo:
     )
 
 
+def ensure_group_device(
+    hass: HomeAssistant, entry, group_id: str, name: str, hub_device_id: str
+) -> str:
+    """Crée (ou retrouve) le device d'un groupe de luminaires, relié au hub. Retourne son id."""
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"group_{group_id}")},
+        via_device_id=hub_device_id,
+        name=name,
+        manufacturer="Twin Development sa",
+        model="Groupe de luminaires PHS16-LC",
+    )
+    return device.id
+
+
+def group_device_info(entry_id: str, group_id: str, hub_device_id: str, name: str) -> DeviceInfo:
+    """Device d'un groupe de luminaires (mêmes identifiants que `ensure_group_device`)."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"group_{group_id}")},
+        via_device_id=hub_device_id,
+        name=name,
+        manufacturer="Twin Development sa",
+        model="Groupe de luminaires PHS16-LC",
+    )
+
+
 class Phs16Entity(CoordinatorEntity[Phs16Coordinator]):
     """Base commune : unique_id stable + device SPOT. `entity_key` distingue les plateformes."""
 
@@ -91,3 +117,31 @@ def add_spot_entities_listener(
 
     _add_new_spots()
     entry.async_on_unload(coordinator.async_add_listener(_add_new_spots))
+
+
+def add_group_entities_listener(
+    hass,
+    entry,
+    coordinator: Phs16Coordinator,
+    async_add_entities,
+    factory: Callable[[str], object],
+) -> None:
+    """Crée `factory(group_id)` pour chaque groupe connu, et à chaque rechargement
+    de `groups.json` (les groupes sont relus à chaque cycle de polling, D20)."""
+    known: set[str] = set()
+
+    @callback
+    def _add_new_groups() -> None:
+        new = []
+        for group_id in coordinator.groups:
+            if group_id in known:
+                continue
+            result = factory(group_id)
+            entities = result if isinstance(result, list) else [result]
+            new.extend(entities)
+            known.add(group_id)
+        if new:
+            async_add_entities(new)
+
+    _add_new_groups()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_groups))

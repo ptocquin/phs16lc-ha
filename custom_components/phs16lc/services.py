@@ -7,6 +7,8 @@ les services sont retirés quand la dernière entrée est déchargée.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
@@ -23,6 +25,35 @@ def _coordinators(hass: HomeAssistant) -> list[Phs16Coordinator]:
     return list(hass.data.get(DOMAIN, {}).values())
 
 
+def _group_target(raw: object) -> str | None:
+    """ "group:<id>" -> "<id>" ; sinon None (cible = adresse carte)."""
+    text = str(raw).strip()
+    if text.lower().startswith("group:"):
+        return text[len("group:") :].strip()
+    return None
+
+
+def _require_group(coordinator: Phs16Coordinator, group_id: str) -> None:
+    if group_id not in coordinator.groups:
+        raise ServiceValidationError(
+            f"groupe inconnu : {group_id!r} — définis dans <config>/phs16lc/groups.json "
+            f"(groupes connus : {sorted(coordinator.groups) or 'aucun'})"
+        )
+
+
+def _raise_if_group_errors(group_id: str, results: dict[int, str | None]) -> None:
+    errors = {a: e for a, e in results.items() if e}
+    if errors:
+        raise HomeAssistantError(f"Groupe {group_id} : {len(errors)} carte(s) en erreur : {errors}")
+
+
+def _safe_filename(name: str) -> str:
+    """Nom de fichier de recette/scène : basename uniquement (pas de chemin)."""
+    if not name or Path(name).name != name or name in (".", ".."):
+        raise ServiceValidationError(f"nom de fichier invalide : {name!r} (basename attendu)")
+    return name
+
+
 def _addresses(raw: object, coordinator: Phs16Coordinator) -> list[int]:
     """ "1" -> [1] ; "all" -> toutes les adresses connues ; sinon ServiceValidationError."""
     text = str(raw).strip()
@@ -31,7 +62,9 @@ def _addresses(raw: object, coordinator: Phs16Coordinator) -> list[int]:
     try:
         address = int(text)
     except ValueError:
-        raise ServiceValidationError(f"address invalide : {raw!r} (entier ou 'all')") from None
+        raise ServiceValidationError(
+            f"address invalide : {raw!r} (entier, 'all' ou 'group:<id>')"
+        ) from None
     if address not in coordinator.data.spots:
         port = coordinator.entry.data.get("port")
         raise ServiceValidationError(
@@ -58,9 +91,18 @@ async def _handle_scan(call: ServiceCall) -> None:
 
 
 async def _handle_apply_recipe(call: ServiceCall) -> None:
-    recipe = str(call.data["recipe"])
+    recipe = _safe_filename(str(call.data["recipe"]))
     group = call.data.get("group") or None
     for coordinator in _coordinators(call.hass):
+        gid = _group_target(call.data["address"])
+        if gid is not None:
+            _require_group(coordinator, gid)
+            try:
+                results = await coordinator.async_apply_recipe_to_group(gid, recipe, group=group)
+            except _ERRORS as exc:
+                raise HomeAssistantError(f"Groupe {gid} : {exc}") from exc
+            _raise_if_group_errors(gid, results)
+            continue
         for address in _addresses(call.data["address"], coordinator):
             try:
                 await coordinator.async_apply_recipe(address, recipe, group=group)
@@ -69,7 +111,7 @@ async def _handle_apply_recipe(call: ServiceCall) -> None:
 
 
 async def _handle_apply_scene(call: ServiceCall) -> None:
-    scene_name = str(call.data["file"])
+    scene_name = _safe_filename(str(call.data["file"]))
     save = bool(call.data.get("save", False))
     for coordinator in _coordinators(call.hass):
         try:
@@ -80,6 +122,15 @@ async def _handle_apply_scene(call: ServiceCall) -> None:
 
 async def _handle_save(call: ServiceCall) -> None:
     for coordinator in _coordinators(call.hass):
+        gid = _group_target(call.data["address"])
+        if gid is not None:
+            _require_group(coordinator, gid)
+            try:
+                results = await coordinator.async_save_group(gid)
+            except _ERRORS as exc:
+                raise HomeAssistantError(f"Groupe {gid} : {exc}") from exc
+            _raise_if_group_errors(gid, results)
+            continue
         for address in _addresses(call.data["address"], coordinator):
             try:
                 await coordinator.async_save(address)
@@ -90,6 +141,15 @@ async def _handle_save(call: ServiceCall) -> None:
 async def _handle_set_channels(call: ServiceCall) -> None:
     currents = _parse_currents(call.data["currents"])
     for coordinator in _coordinators(call.hass):
+        gid = _group_target(call.data["address"])
+        if gid is not None:
+            _require_group(coordinator, gid)
+            try:
+                results = await coordinator.async_set_channels_group(gid, currents)
+            except _ERRORS as exc:
+                raise HomeAssistantError(f"Groupe {gid} : {exc}") from exc
+            _raise_if_group_errors(gid, results)
+            continue
         for address in _addresses(call.data["address"], coordinator):
             spot = coordinator.data.spots[address]
             if spot.currents and len(currents) != len(spot.currents):
@@ -107,6 +167,15 @@ async def _handle_set_channel(call: ServiceCall) -> None:
     channel = int(call.data["channel"])
     ma = int(call.data["ma"])
     for coordinator in _coordinators(call.hass):
+        gid = _group_target(call.data["address"])
+        if gid is not None:
+            _require_group(coordinator, gid)
+            try:
+                results = await coordinator.async_set_channel_group(gid, channel, ma)
+            except _ERRORS as exc:
+                raise HomeAssistantError(f"Groupe {gid} : {exc}") from exc
+            _raise_if_group_errors(gid, results)
+            continue
         for address in _addresses(call.data["address"], coordinator):
             spot = coordinator.data.spots[address]
             base = list(spot.currents) if spot.currents else [0] * 16

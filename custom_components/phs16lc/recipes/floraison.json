@@ -1,0 +1,5 @@
+{
+  "name": "floraison",
+  "description": "Spectre floraison : tous canaux à 1200 mA",
+  "channels": [1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200]
+}

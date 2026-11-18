@@ -4,6 +4,11 @@
 #   uv run python dashboards/generate_dashboards.py
 # Les fichiers produits partent dans dashboards/generated/ (voir README.md).
 #
+# Groupes de luminaires : source de vérité = dashboards/groups.json (même fichier
+# que <config>/phs16lc/groups.json lu par l'intégration, copié tel quel sur la cible).
+# Le générateur l'utilise automatiquement s'il est présent (--groups pour un autre
+# chemin) ; sinon ce sont les `groupes:` de ce mapping.yaml qui servent.
+#
 # Conventions de nommage (le générateur s'y appuie, ne les change pas à la légère) :
 #   area HA            : l'area doit avoir pour identifiant (slug) la clé de la chambre
 #                        ex. area « Serre 1 » -> area_id `serre_1`

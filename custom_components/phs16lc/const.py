@@ -28,6 +28,11 @@ EVENT_RECIPE_APPLIED = f"{DOMAIN}_recipe_applied"
 EVENT_SCENE_APPLIED = f"{DOMAIN}_scene_applied"
 EVENT_SAVED = f"{DOMAIN}_saved"
 EVENT_SCANNED = f"{DOMAIN}_scan"
+EVENT_GROUP_RECIPE_APPLIED = f"{DOMAIN}_group_recipe_applied"
+
+# Groupes de luminaires (phase 10) : fichier groups.json à côté du dossier des recettes
+GROUPS_FILENAME = "groups.json"
+DEFAULT_CHANNELS = 16
 
 
 # HA OS 16+ monte la config en `/homeassistant` dans les add-ons, mais le
@@ -52,7 +57,7 @@ def resolve_config_path(path: str, *, roots: tuple[str, ...] = _CONFIG_ROOTS) ->
             for alt in roots:
                 if alt == prefix:
                     continue
-                cand = Path(alt + s[len(prefix):])
+                cand = Path(alt + s[len(prefix) :])
                 if cand.exists():
                     return cand
     return p
@@ -66,6 +71,11 @@ def recipes_dir_for_entry(entry) -> Path:
 def scenes_dir_for(recipes_dir: str | Path) -> Path:
     """Dossier des scènes = dossier « scenes » à côté du dossier des recettes (résolu)."""
     return resolve_config_path(str(Path(recipes_dir).parent / "scenes"))
+
+
+def groups_file_for(recipes_dir: str | Path) -> Path:
+    """Fichier des groupes de luminaires = `groups.json` à côté du dossier des recettes (résolu)."""
+    return resolve_config_path(str(Path(recipes_dir).parent / GROUPS_FILENAME))
 
 
 def entry_value(entry, key: str):

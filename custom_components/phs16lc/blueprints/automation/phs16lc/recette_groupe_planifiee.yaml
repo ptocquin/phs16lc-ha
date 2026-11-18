@@ -1,0 +1,93 @@
+blueprint:
+  name: "PHS16-LC — Recette planifiée d'un groupe de luminaires"
+  description: >
+    Applique une recette lumineuse à un groupe de luminaires (défini dans
+    groups.json, exposé comme select « Recette » du device « Groupe … ») selon
+    un schedule (programme de photopériode) : schedule ON -> la recette choisie
+    est appliquée à tous les membres du groupe ; schedule OFF -> extinction du
+    groupe. Tant que le booléen « mode manuel » est ON, l'automatisation ne
+    touche à rien ; au retour en automatique, l'état courant du schedule est
+    réappliqué. Cible : select.phs16lc_group_<id>_recette + light.phs16lc_group_<id>.
+  domain: automation
+  input:
+    programme:
+      name: Schedule (photopériode)
+      description: Helper « Programme » (schedule), ex. schedule.photo_serre_1_nord
+      selector:
+        entity:
+          domain: schedule
+    select_recette:
+      name: Select « Recette » du groupe
+      description: Ex. select.phs16lc_group_serre_1_nord_recette (créé par l'intégration)
+      selector:
+        entity:
+          domain: select
+          integration: phs16lc
+    light_groupe:
+      name: Light du groupe
+      description: Ex. light.phs16lc_group_serre_1_nord (créé par l'intégration)
+      selector:
+        entity:
+          domain: light
+          integration: phs16lc
+    recette:
+      name: Recette à appliquer (schedule ON)
+      description: Nom du fichier JSON, ex. "croissance.json"
+      selector:
+        text:
+    mode_manuel:
+      name: Mode manuel (ON = l'automatisation ne touche à rien)
+      selector:
+        entity:
+          domain: input_boolean
+
+trigger:
+  - platform: state
+    entity_id: !input programme
+    to: "on"
+  - platform: state
+    entity_id: !input programme
+    to: "off"
+  - platform: state
+    entity_id: !input mode_manuel
+    to: "off"   # retour en automatique : resynchroniser avec l'état courant du schedule
+
+condition:
+  - condition: state
+    entity_id: !input mode_manuel
+    state: "off"
+
+action:
+  - choose:
+      # Retour du mode manuel -> réappliquer l'état courant du schedule
+      - conditions: "{{ trigger.entity_id == input_mode_manuel }}"
+        sequence:
+          - choose:
+              - conditions: "{{ states(programme) == 'on' }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input select_recette
+                    data:
+                      option: !input recette
+              - conditions: "{{ states(programme) == 'off' }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input light_groupe
+      # Schedule passe à ON -> recette du groupe
+      - conditions: "{{ trigger.to == 'on' }}"
+        sequence:
+          - service: select.select_option
+            target:
+              entity_id: !input select_recette
+            data:
+              option: !input recette
+      # Schedule passe à OFF -> extinction du groupe
+      - conditions: "{{ trigger.to == 'off' }}"
+        sequence:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_groupe
+
+mode: queued

@@ -18,7 +18,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_RX_PORT, DOMAIN, recipes_dir_for_entry, scenes_dir_for
+from .const import (
+    CONF_RECIPES_DIR,
+    CONF_RX_PORT,
+    DEFAULT_RECIPES_DIR,
+    DOMAIN,
+    GROUPS_FILENAME,
+    entry_value,
+    recipes_dir_for_entry,
+    scenes_dir_for,
+)
 from .coordinator import Phs16Coordinator
 from .entity import ensure_hub_device
 from .phs16ctl.link import PhsLink
@@ -30,6 +39,13 @@ _LOGGER = logging.getLogger(__name__)
 # HA ne lit les blueprints que depuis /config/blueprints/, donc sans cette copie ils
 # n'apparaîtraient pas dans Réglages → Automatisations → Créer → onglet Blueprint.
 BLUEPRINTS_SRC_DIR = Path(__file__).parent / "blueprints" / "automation"
+
+# Données embarquées (recettes, scènes, groupes) copiées vers <config>/phs16lc/ au
+# premier démarrage SI ABSENTES : un dossier recipes_dir personnalisé reste géré
+# manuellement, et on n'écrase jamais les fichiers modifiés par l'utilisateur.
+EMBEDDED_RECIPES_DIR = Path(__file__).parent / "recipes"
+EMBEDDED_SCENES_DIR = Path(__file__).parent / "scenes"
+EMBEDDED_GROUPS_FILE = Path(__file__).parent / GROUPS_FILENAME
 
 # Toutes les plateformes sont en place (phases 1-5)
 PLATFORMS: list[Platform] = [
@@ -92,6 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     coordinator.hub_device_id = ensure_hub_device(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
+    await async_install_embedded_data(hass, entry)
     _warn_if_recipes_dir_missing(entry)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -103,9 +120,65 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     return True
 
 
+async def async_install_embedded_data(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> int:
+    """Copie les recettes/scènes/groups embarqués vers `<config>/phs16lc/` (si absents).
+
+    Uniquement quand `recipes_dir` est celui par défaut : un dossier personnalisé
+    reste géré manuellement. Copie « si absent » uniquement (jamais d'écrasement).
+    Retourne le nombre de fichiers écrits.
+    """
+    if str(entry_value(entry, CONF_RECIPES_DIR)) != DEFAULT_RECIPES_DIR:
+        return 0
+    recipes_dir = recipes_dir_for_entry(entry)
+    try:
+        return await hass.async_add_executor_job(_install_embedded_data, recipes_dir)
+    except OSError as exc:
+        # ex. venv de dev sur Mac avec recipes_dir par défaut : /config n'existe pas
+        # -> on ne fait pas échouer le setup, copie manuelle (GUIDE §5.4)
+        _LOGGER.warning(
+            "Copie auto des données embarquées impossible vers %s : %s — "
+            "copiez-les manuellement (GUIDE §5.4)",
+            recipes_dir,
+            exc,
+        )
+        return 0
+
+
+def _install_embedded_data(recipes_dir: Path) -> int:
+    """Copie les *.json embarqués vers recipes_dir / <racine>/scenes / <racine>/groups.json."""
+    dest_root = recipes_dir.parent
+    copied = 0
+    for src_dir, dest_dir in (
+        (EMBEDDED_RECIPES_DIR, recipes_dir),
+        (EMBEDDED_SCENES_DIR, dest_root / "scenes"),
+    ):
+        if not src_dir.is_dir():
+            continue
+        for src in sorted(src_dir.glob("*.json")):
+            dest = dest_dir / src.name
+            if dest.exists():
+                continue
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            copied += 1
+            _LOGGER.info("Donnée embarquée installée (fichier absent) : %s", dest)
+    if EMBEDDED_GROUPS_FILE.is_file():
+        dest_groups = dest_root / GROUPS_FILENAME
+        if not dest_groups.exists():
+            dest_groups.write_text(
+                EMBEDDED_GROUPS_FILE.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            copied += 1
+            _LOGGER.info("Donnée embarquée installée (fichier absent) : %s", dest_groups)
+    return copied
+
+
 def _warn_if_recipes_dir_missing(entry: Phs16lcConfigEntry) -> None:
     """Warn au setup si le dossier de recettes est introuvable (listes « Recette » vides).
 
+    Les recettes/scènes/groups embarqués sont copiés automatiquement au premier
+    démarrage dans le dossier par défaut ; ce warning ne survient plus que si le
+    dossier a été supprimé ou si recipes_dir est personnalisé et vide.
     HA OS 16+ monte la config en `/homeassistant` dans les add-ons mais en
     `/config` dans le conteneur core : la copie se fait donc à
     `<config>/phs16lc/recipes` = `/homeassistant/phs16lc/recipes` depuis l'add-on SSH.

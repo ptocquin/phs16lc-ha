@@ -1,0 +1,8 @@
+{
+  "name": "spectre",
+  "description": "Deux zones spectrales : bleu (canaux 1-8) à 1000 mA, rouge (canaux 9-16) à 1200 mA",
+  "groups": {
+    "bleu":  { "channels": [1, 2, 3, 4, 5, 6, 7, 8], "current": 1000 },
+    "rouge": { "channels": [9, 10, 11, 12, 13, 14, 15, 16], "current": 1200 }
+  }
+}

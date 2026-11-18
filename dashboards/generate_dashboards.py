@@ -5,6 +5,14 @@ Usage (depuis ha-integration/) :
     uv run python dashboards/generate_dashboards.py            # mapping par défaut
     uv run python dashboards/generate_dashboards.py --mapping dashboards/mapping.yaml \
         --out dashboards/generated
+    uv run python dashboards/generate_dashboards.py --groups dashboards/groups.json
+
+`--groups` : fichier groups.json (le MÊME que l'intégration lit dans
+`<config>/phs16lc/groups.json`) — devient la source de vérité des groupes :
+chaque entrée a un `area` (= id de chambre du mapping) et des `addresses` ;
+le nom de groupe est l'id sans le préfixe `<area>_`. Sans `--groups`, ce sont
+les `groupes` de mapping.yaml qui sont utilisés (rétrocompatible). Par défaut,
+`dashboards/groups.json` est utilisé s'il existe.
 
 Produit dans dashboards/generated/ :
 
@@ -66,11 +74,39 @@ def recette(ch: str, g: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_chambres(mapping_path: Path) -> dict[str, dict]:
+def apply_groups_file(chambres: dict[str, dict], groups_path: Path) -> None:
+    """Remplace les `groupes` des chambres par ceux de groups.json (source unique,
+    partagée avec l'intégration qui le lit dans <config>/phs16lc/groups.json)."""
+    import json
+
+    data = json.loads(groups_path.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and isinstance(data.get("groups"), dict):
+        data = data["groups"]
+    par_chambre: dict[str, dict[str, list[int]]] = {}
+    for gid, g in data.items():
+        if not isinstance(g, dict):
+            continue
+        area = g.get("area")
+        if not area:
+            print(f"WARNING: groupe '{gid}' sans 'area' — ignoré")
+            continue
+        if area not in chambres:
+            print(f"WARNING: groupe '{gid}' -> area '{area}' absente de mapping.yaml — ignoré")
+            continue
+        name = gid[len(area) + 1 :] if gid.startswith(area + "_") else gid
+        par_chambre.setdefault(area, {})[name] = [int(a) for a in g.get("addresses") or []]
+    for ch, groupes in par_chambre.items():
+        chambres[ch]["groupes"] = groupes
+        print(f"INFO: chambre '{ch}' : {len(groupes)} groupe(s) depuis {groups_path.name}")
+
+
+def load_chambres(mapping_path: Path, groups_path: Path | None = None) -> dict[str, dict]:
     data = yaml.safe_load(mapping_path.read_text(encoding="utf-8")) or {}
     chambres = data.get("chambres") or {}
     if not chambres:
         sys.exit(f"mapping vide ou sans clé 'chambres' : {mapping_path}")
+    if groups_path is not None and groups_path.is_file():
+        apply_groups_file(chambres, groups_path)
     for ch, cfg in chambres.items():
         spots = [int(s) for g in (cfg.get("groupes") or {}).values() for s in g]
         if not spots:
@@ -481,9 +517,18 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mapping", type=Path, default=HERE / "mapping.yaml")
     ap.add_argument("--out", type=Path, default=HERE / "generated")
+    ap.add_argument(
+        "--groups",
+        type=Path,
+        default=None,
+        help="groups.json source des groupes (défaut: dashboards/groups.json si présent)",
+    )
     args = ap.parse_args()
 
-    chambres = load_chambres(args.mapping)
+    groups_path = args.groups
+    if groups_path is None and (HERE / "groups.json").is_file():
+        groups_path = HERE / "groups.json"
+    chambres = load_chambres(args.mapping, groups_path)
     out = args.out
 
     dump(

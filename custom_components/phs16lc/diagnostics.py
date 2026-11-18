@@ -12,7 +12,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, recipes_dir_for_entry, scenes_dir_for
+from .const import DOMAIN, groups_file_for, recipes_dir_for_entry, scenes_dir_for
 from .coordinator import Phs16Coordinator
 from .phs16ctl import protocol as proto
 from .phs16ctl.link import T_GI, T_GL, available_ports
@@ -64,6 +64,25 @@ async def async_get_config_entry_diagnostics(
             }
         }
 
+    recipes_dir = recipes_dir_for_entry(entry)
+    groups_file = groups_file_for(recipes_dir)
+    groups_info = {
+        group_id: {
+            "name": group.name,
+            "color": group.color,
+            "icon": group.icon,
+            "area": group.area,
+            "addresses": group.addresses,
+            "members_online": [
+                a
+                for a in group.addresses
+                if (spot := coordinator.data.spots.get(a)) is not None and spot.online
+            ],
+            "registry": coordinator.group_registry_sync.get(group_id),
+        }
+        for group_id, group in sorted(coordinator.groups.items())
+    }
+
     return {
         "entry": {
             "title": entry.title,
@@ -75,6 +94,11 @@ async def async_get_config_entry_diagnostics(
             "tx_port": coordinator.link.tx_port,
             "rx_port": coordinator.link.rx_port,
             "single_port": coordinator.link.single_port,
+        },
+        "groups_file": {
+            "path": str(groups_file),
+            "exists": groups_file.is_file(),
+            "groups": groups_info,
         },
         **_fs_info(),
         **collected,

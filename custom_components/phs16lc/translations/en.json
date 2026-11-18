@@ -84,11 +84,11 @@
     },
     "apply_recipe": {
       "name": "Apply a recipe",
-      "description": "Applies a lighting recipe to one card (or to all with address=all).",
+      "description": "Applies a recipe to one card, to all (address=all) or to a whole luminaire group (address=group:<id>).",
       "fields": {
         "address": {
           "name": "Address",
-          "description": "Card number (e.g. \"1\") or \"all\"."
+          "description": "Card number (e.g. \"1\"), \"all\" (all cards) or \"group:<id>\" (luminaire group defined in groups.json)."
         },
         "recipe": {
           "name": "Recipe",
@@ -120,7 +120,7 @@
       "fields": {
         "address": {
           "name": "Address",
-          "description": "Card number (e.g. \"1\")."
+          "description": "Card number (e.g. \"1\"), \"all\" or \"group:<id>\"."
         }
       }
     },
@@ -130,7 +130,7 @@
       "fields": {
         "address": {
           "name": "Address",
-          "description": "Card number."
+          "description": "Card number, \"all\" or \"group:<id>\"."
         },
         "currents": {
           "name": "Currents (mA)",
@@ -144,7 +144,7 @@
       "fields": {
         "address": {
           "name": "Address",
-          "description": "Card number."
+          "description": "Card number, \"all\" or \"group:<id>\"."
         },
         "channel": {
           "name": "Channel",

@@ -1,0 +1,9 @@
+{
+  "name": "croissance",
+  "description": "Spectre croissance : canaux 1-8 à 800 mA, canaux 9-16 éteints",
+  "channels": [800, 800, 800, 800, 800, 800, 800, 800, 0, 0, 0, 0, 0, 0, 0, 0],
+  "groups": {
+    "vegetatif": { "channels": [1, 2, 3, 4, 5, 6, 7, 8], "current": 800 },
+    "repos":     { "channels": [9, 10, 11, 12, 13, 14, 15, 16], "current": 0 }
+  }
+}
