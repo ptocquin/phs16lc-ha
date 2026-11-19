@@ -335,39 +335,46 @@ views:
     - type: markdown
       content: '**Attention** — ne pas régler la **luminosité** d''un groupe : cela envoie un courant uniforme aux 16 canaux
         de chaque SPOT et écrase la recette. On/off OK (la recette se réapplique), intensité = recette.'
-    - type: custom:auto-entities
-      card:
-        type: entities
-        title: Groupe nord
-      filter:
-        include:
-        - domain: light
-          label: serre_1_nord
-      sort:
-        method: name
     - type: tile
-      entity: light.serre_1_groupe_nord
-      name: Groupe nord
+      entity: light.serre_1_nord
+      name: Serre 1 — Nord
+      icon: mdi:leaf
       features:
       - type: light-brightness
+      tap_action:
+        action: more-info
+    - type: entities
+      title: Serre 1 — Nord — recette, NVM, membres
+      entities:
+      - entity: select.serre_1_nord_recipe
+        name: Recette
+      - entity: button.serre_1_nord_save_to_nvm
+        name: Sauvegarder NVM
+      - light.spot_1
+      - light.spot_2
+      - light.spot_3
+      - light.spot_4
     - type: tile
       entity: input_boolean.manuel_serre_1_nord
       name: Manuel — nord
-    - type: custom:auto-entities
-      card:
-        type: entities
-        title: Groupe sud
-      filter:
-        include:
-        - domain: light
-          label: serre_1_sud
-      sort:
-        method: name
     - type: tile
-      entity: light.serre_1_groupe_sud
-      name: Groupe sud
+      entity: light.serre_1_sud
+      name: Serre 1 — Sud
+      icon: mdi:sprout
       features:
       - type: light-brightness
+      tap_action:
+        action: more-info
+    - type: entities
+      title: Serre 1 — Sud — recette, NVM, membres
+      entities:
+      - entity: select.serre_1_sud_recipe
+        name: Recette
+      - entity: button.serre_1_sud_save_to_nvm
+        name: Sauvegarder NVM
+      - light.spot_5
+      - light.spot_6
+      - light.spot_7
     - type: tile
       entity: input_boolean.manuel_serre_1_sud
       name: Manuel — sud
@@ -496,21 +503,24 @@ views:
     - type: markdown
       content: '**Attention** — ne pas régler la **luminosité** d''un groupe : cela envoie un courant uniforme aux 16 canaux
         de chaque SPOT et écrase la recette. On/off OK (la recette se réapplique), intensité = recette.'
-    - type: custom:auto-entities
-      card:
-        type: entities
-        title: Groupe all
-      filter:
-        include:
-        - domain: light
-          label: serre_2_all
-      sort:
-        method: name
     - type: tile
-      entity: light.serre_2_groupe_all
-      name: Groupe all
+      entity: light.serre_2_tous
+      name: Serre 2 — Tous
+      icon: mdi:lightbulb-group
       features:
       - type: light-brightness
+      tap_action:
+        action: more-info
+    - type: entities
+      title: Serre 2 — Tous — recette, NVM, membres
+      entities:
+      - entity: select.serre_2_tous_recipe
+        name: Recette
+      - entity: button.serre_2_tous_save_to_nvm
+        name: Sauvegarder NVM
+      - light.spot_8
+      - light.spot_9
+      - light.spot_10
     - type: tile
       entity: input_boolean.manuel_serre_2_all
       name: Manuel — all
