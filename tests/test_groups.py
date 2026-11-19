@@ -501,7 +501,7 @@ async def test_groups_hot_reload_adds_entities(
     assert set(coord.groups) == {"serre_1_nord"}
 
     # édition de groups.json : nouveau groupe + changement de couleur
-    groups = dict(GROUPS)
+    groups = json.loads(json.dumps(GROUPS))  # copie profonde (GROUPS est module-level)
     groups["serre_1_nord"]["color"] = "#00FF00"
     groups["serre_2_all"] = {"name": "Serre 2", "addresses": [3]}
     (tmp_path / "phs16lc" / "groups.json").write_text(json.dumps(groups), encoding="utf-8")
@@ -582,3 +582,149 @@ async def test_install_embedded_data_oserror_does_not_break_setup(
     monkeypatch.setattr(phs16lc, "_install_embedded_data", boom)
     entry = SimpleNamespace(data={"recipes_dir": "/config/phs16lc/recipes"}, options={})
     assert await phs16lc.async_install_embedded_data(hass, entry) == 0
+
+
+# ---------------------------------------------------------------------------
+# Services set_group / remove_group (édition des groupes depuis l'UI)
+# ---------------------------------------------------------------------------
+
+
+def _groups_file(tmp_path: Path) -> Path:
+    return tmp_path / "phs16lc" / "groups.json"
+
+
+async def test_set_group_creates_group_hot_reloaded(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path, groups=None)
+    assert coord.groups == {}
+
+    await _call(
+        hass,
+        DOMAIN,
+        "set_group",
+        {
+            "group_id": "serre_1_nord",
+            "name": "Serre 1 — Nord",
+            "addresses": "1,2",
+            "color": "#4CAF50",
+            "icon": "mdi:leaf",
+            "area": "serre_1",
+        },
+    )
+
+    # coordinator rechargé à chaud (sans attendre le polling)
+    assert set(coord.groups) == {"serre_1_nord"}
+    group = coord.groups["serre_1_nord"]
+    assert group.addresses == [1, 2] and group.name == "Serre 1 — Nord" and group.area == "serre_1"
+    # groups.json réécrit
+    data = json.loads(_groups_file(tmp_path).read_text(encoding="utf-8"))
+    assert data["serre_1_nord"]["addresses"] == [1, 2]
+    assert data["serre_1_nord"]["color"] == "#4CAF50"
+    # entités du groupe créées immédiatement
+    light_id = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_nord_light")
+    assert hass.states.get(light_id) is not None
+    # label coloré + area synchronisés
+    assert lr.async_get(hass).async_get_label_by_name("serre_1_nord") is not None
+    assert ar.async_get(hass).async_get_area_by_name("serre_1") is not None
+
+
+async def test_set_group_attach_detach_via_spots_selector(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)  # serre_1_nord = [1, 2]
+    spot1 = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_spot_1_light")
+    spot2 = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_spot_2_light")
+
+    # détacher le SPOT 2 : on ne sélectionne plus que le SPOT 1
+    await _call(hass, DOMAIN, "set_group", {"group_id": "serre_1_nord", "spots": [spot1]})
+    assert coord.groups["serre_1_nord"].addresses == [1]
+    # mise à jour partielle : nom/couleur conservés
+    assert coord.groups["serre_1_nord"].name == "Serre 1 — Nord"
+    assert coord.groups["serre_1_nord"].color == "#4CAF50"
+
+    # rattacher le SPOT 2
+    await _call(hass, DOMAIN, "set_group", {"group_id": "serre_1_nord", "spots": [spot1, spot2]})
+    assert coord.groups["serre_1_nord"].addresses == [1, 2]
+
+
+async def test_set_group_rejects_non_spot_entity(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot()}
+    entry, _ = await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
+    group_light = _entity_id(
+        hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_nord_light"
+    )
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, DOMAIN, "set_group", {"group_id": "serre_1_nord", "spots": [group_light]})
+
+
+async def test_set_group_addresses_all_and_unknown_address_ok(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    _, coord = await _setup(hass, monkeypatch, bus, tmp_path, groups=None)
+
+    await _call(hass, DOMAIN, "set_group", {"group_id": "all_spots", "addresses": "all"})
+    assert coord.groups["all_spots"].addresses == [1, 2]
+
+    # adresse pas encore scannée : acceptée (groupe défini avant que la carte soit en ligne)
+    await _call(hass, DOMAIN, "set_group", {"group_id": "futur", "addresses": "1,9"})
+    assert coord.groups["futur"].addresses == [1, 9]
+
+
+async def test_set_group_validation_errors(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot()}
+    await _setup(hass, monkeypatch, bus, tmp_path, groups=None, expected=1)
+    with pytest.raises(HomeAssistantError):  # id invalide
+        await _call(hass, DOMAIN, "set_group", {"group_id": "bad id!", "addresses": "1"})
+    with pytest.raises(HomeAssistantError):  # création sans membre
+        await _call(hass, DOMAIN, "set_group", {"group_id": "vide"})
+    with pytest.raises(HomeAssistantError):  # addresses invalides
+        await _call(hass, DOMAIN, "set_group", {"group_id": "g", "addresses": "x,y"})
+
+
+async def test_set_group_rename(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)  # serre_1_nord existe
+
+    await _call(
+        hass,
+        DOMAIN,
+        "set_group",
+        {"group_id": "serre_1_nord", "new_group_id": "serre_1_rangee_nord"},
+    )
+
+    assert "serre_1_rangee_nord" in coord.groups
+    assert "serre_1_nord" not in coord.groups
+    data = json.loads(_groups_file(tmp_path).read_text(encoding="utf-8"))
+    assert "serre_1_rangee_nord" in data and "serre_1_nord" not in data
+    # entité du nouveau groupe créée à chaud
+    assert _entity_id(
+        hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_rangee_nord_light"
+    )
+
+
+async def test_remove_group(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    light_id = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_nord_light")
+
+    await _call(hass, DOMAIN, "remove_group", {"group_id": "serre_1_nord"})
+
+    assert coord.groups == {}
+    assert json.loads(_groups_file(tmp_path).read_text(encoding="utf-8")) == {}
+    state = hass.states.get(light_id)
+    assert state is not None and state.state == "unavailable"
+
+    with pytest.raises(HomeAssistantError):  # groupe inconnu
+        await _call(hass, DOMAIN, "remove_group", {"group_id": "serre_1_nord"})

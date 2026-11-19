@@ -1,22 +1,42 @@
 """Handlers des services `phs16lc.*` (décrits dans services.yaml + traductions).
 
-`address` accepte un numéro de carte ("1") ou "all" (toutes les cartes connues
-du coordinator). Enregistrement idempotent (plusieurs entrées = plusieurs bus) ;
-les services sont retirés quand la dernière entrée est déchargée.
+`address` accepte un numéro de carte ("1"), "all" (toutes les cartes connues
+du coordinator) ou "group:<id>" (groupe de luminaires de groups.json).
+
+`set_group` / `remove_group` créent, modifient (membres, nom, couleur, icône,
+pièce, renommage) et suppriment les groupes de luminaires **depuis l'UI**
+(Outils de développement → Actions) : ils réécrivent `<config>/phs16lc/groups.json`
+et le coordinator recharge le fichier à chaud (entités de groupe ajoutées/retirées
+immédiatement, sans attendre le polling).
+
+Enregistrement idempotent (plusieurs entrées = plusieurs bus) ; les services sont
+retirés quand la dernière entrée est déchargée.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import CONF_PORT, DOMAIN, entry_value, groups_file_for, recipes_dir_for_entry
 from .coordinator import Phs16Coordinator
+from .groups import GROUP_ID_RE, GroupDef, load_groups, save_groups
 from .phs16ctl.controller import LuminaireError
 
-SERVICES = ("scan", "apply_recipe", "apply_scene", "save", "set_channels", "set_channel")
+SERVICES = (
+    "scan",
+    "apply_recipe",
+    "apply_scene",
+    "save",
+    "set_channels",
+    "set_channel",
+    "set_group",
+    "remove_group",
+)
 
 _ERRORS = (LuminaireError, OSError, ValueError, KeyError)
 
@@ -190,6 +210,156 @@ async def _handle_set_channel(call: ServiceCall) -> None:
                 raise HomeAssistantError(f"SPOT {address} : {exc}") from exc
 
 
+# ---------------------------------------------------------------------------
+# Gestion des groupes de luminaires depuis l'UI (set_group / remove_group)
+# ---------------------------------------------------------------------------
+
+
+def _group_coordinator(
+    hass: HomeAssistant, call: ServiceCall, group_id: str | None = None
+) -> Phs16Coordinator:
+    """Coordinator cible : celui du bus `port` si donné, sinon celui qui connaît
+    déjà `group_id`, sinon le premier bus (création d'un nouveau groupe)."""
+    coordinators = _coordinators(hass)
+    if not coordinators:
+        raise ServiceValidationError("intégration phs16lc non chargée (aucune entrée)")
+    port = str(call.data.get("port") or "").strip()
+    if port:
+        for coordinator in coordinators:
+            if str(entry_value(coordinator.entry, CONF_PORT)) == port:
+                return coordinator
+        ports = [str(entry_value(c.entry, CONF_PORT)) for c in coordinators]
+        raise ServiceValidationError(f"bus {port!r} introuvable (bus connus : {ports})")
+    if group_id:
+        for coordinator in coordinators:
+            if group_id in coordinator.groups:
+                return coordinator
+    return coordinators[0]
+
+
+def _parse_group_addresses(raw: object, coordinator: Phs16Coordinator) -> list[int]:
+    """Champ `addresses` de set_group : "1,2,3", [1, 2] ou "all" (SPOT connus).
+
+    Une adresse inconnue du scan est acceptée : on peut définir un groupe avant
+    que la carte soit en ligne (le scan s'arrête au premier silence).
+    """
+    text = str(raw).strip()
+    if text.lower() == "all":
+        return sorted(coordinator.data.spots)
+    values = list(raw) if isinstance(raw, (list, tuple)) else text.replace(",", " ").split()
+    try:
+        addresses = sorted({int(v) for v in values})
+    except TypeError, ValueError:
+        raise ServiceValidationError(
+            f"addresses invalides : {raw!r} (entiers séparés par des virgules, ou 'all')"
+        ) from None
+    if not addresses or addresses[0] < 1:
+        raise ServiceValidationError(f"addresses invalides : {raw!r} (entiers >= 1 requis)")
+    return addresses
+
+
+def _spot_addresses_from_entities(
+    hass: HomeAssistant, coordinator: Phs16Coordinator, entity_ids: object
+) -> list[int]:
+    """Résout les entités `light` sélectionnées (multi-sélecteur UI) en adresses SPOT
+    via l'unique_id `<entry_id>_spot_<n>_light`. Appelé sur le event loop (registre)."""
+    registry = er.async_get(hass)
+    pattern = re.compile(rf"^{re.escape(coordinator.entry.entry_id)}_spot_(\d+)_light$")
+    addresses: list[int] = []
+    for entity_id in entity_ids or []:  # type: ignore[union-attr]
+        reg_entry = registry.async_get(str(entity_id))
+        match = pattern.match(reg_entry.unique_id) if reg_entry is not None else None
+        if match is None:
+            raise ServiceValidationError(
+                f"{entity_id} n'est pas un luminaire SPOT — sélectionnez des entités light.spot_*"
+            )
+        addresses.append(int(match.group(1)))
+    if not addresses:
+        raise ServiceValidationError("sélectionnez au moins un luminaire (spots)")
+    return sorted(set(addresses))
+
+
+async def _handle_set_group(call: ServiceCall) -> None:
+    """Crée ou modifie un groupe de luminaires (écrit groups.json, rechargé à chaud).
+
+    Sémantique de mise à jour partielle : seuls les champs fournis sont modifiés ;
+    `spots`/`addresses` remplacent la liste des membres (attacher/détacher) ;
+    chaîne vide = efface la valeur (sauf name qui retombe sur l'id).
+    """
+    group_id = str(call.data["group_id"]).strip()
+    if not GROUP_ID_RE.match(group_id):
+        raise ServiceValidationError(
+            f"group_id invalide : {group_id!r} (caractères autorisés : A-Z a-z 0-9 _ -)"
+        )
+    new_id = str(call.data.get("new_group_id") or "").strip() or None
+    if new_id is not None and not GROUP_ID_RE.match(new_id):
+        raise ServiceValidationError(f"new_group_id invalide : {new_id!r}")
+    coordinator = _group_coordinator(call.hass, call, group_id)
+    if new_id and new_id != group_id and new_id in coordinator.groups:
+        raise ServiceValidationError(f"le groupe {new_id!r} existe déjà")
+    path = groups_file_for(recipes_dir_for_entry(coordinator.entry))
+
+    # résolution des entités -> adresses SUR le event loop (registre d'entités)
+    if "spots" in call.data:
+        spot_addresses = _spot_addresses_from_entities(call.hass, coordinator, call.data["spots"])
+    elif "addresses" in call.data:
+        spot_addresses = _parse_group_addresses(call.data["addresses"], coordinator)
+    else:
+        spot_addresses = None
+
+    def _do() -> None:
+        groups = load_groups(path)
+        gid = group_id
+        if new_id and new_id != group_id:
+            if group_id in groups:
+                groups[new_id] = groups.pop(group_id)
+            gid = new_id
+        group = groups.get(gid) or GroupDef(id=gid, name=gid, addresses=[])
+        if "name" in call.data:
+            name = str(call.data["name"]).strip()
+            group.name = name or gid
+        if spot_addresses is not None:
+            group.addresses = spot_addresses
+        if "color" in call.data:
+            color = str(call.data["color"]).strip()
+            group.color = color or None
+        if "icon" in call.data:
+            icon = str(call.data["icon"]).strip()
+            group.icon = icon or None
+        if "area" in call.data:
+            area = str(call.data["area"]).strip()
+            group.area = area or None
+        if not group.addresses:
+            raise ServiceValidationError(
+                f"le groupe {gid!r} doit contenir au moins un luminaire — "
+                "renseignez `spots` ou `addresses`"
+            )
+        groups[gid] = group
+        save_groups(path, groups)
+
+    await coordinator.async_io(_do)
+    await coordinator.async_reload_groups_now()
+
+
+async def _handle_remove_group(call: ServiceCall) -> None:
+    """Supprime un groupe de luminaires (groups.json réécrit, rechargé à chaud)."""
+    group_id = str(call.data["group_id"]).strip()
+    coordinator = _group_coordinator(call.hass, call, group_id)
+    path = groups_file_for(recipes_dir_for_entry(coordinator.entry))
+
+    def _do() -> None:
+        groups = load_groups(path)
+        if group_id not in groups:
+            raise ServiceValidationError(
+                f"groupe {group_id!r} inconnu — groupes connus : {sorted(groups) or 'aucun'}"
+            )
+        del groups[group_id]
+        save_groups(path, groups)
+
+    await coordinator.async_io(_do)
+    await coordinator.async_reload_groups_now()
+
+
 _HANDLERS = {
     "scan": _handle_scan,
     "apply_recipe": _handle_apply_recipe,
@@ -197,6 +367,8 @@ _HANDLERS = {
     "save": _handle_save,
     "set_channels": _handle_set_channels,
     "set_channel": _handle_set_channel,
+    "set_group": _handle_set_group,
+    "remove_group": _handle_remove_group,
 }
 
 

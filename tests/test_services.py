@@ -56,7 +56,16 @@ async def _call(hass, service: str, data: dict):
 
 async def test_services_registered_on_setup(hass, monkeypatch, tmp_path) -> None:
     await _setup(hass, monkeypatch, {1: FakeSpot()}, tmp_path, expected=1)
-    for service in ("scan", "apply_recipe", "apply_scene", "save", "set_channels", "set_channel"):
+    for service in (
+        "scan",
+        "apply_recipe",
+        "apply_scene",
+        "save",
+        "set_channels",
+        "set_channel",
+        "set_group",
+        "remove_group",
+    ):
         assert hass.services.has_service(DOMAIN, service), service
 
 

@@ -4,6 +4,11 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.49 — 2026-11-19 — §6.8 : **création/modification des groupes depuis
+> l'UI** — services `phs16lc.set_group` / `phs16lc.remove_group` (sélecteur
+> multi-luminaires `spots`, `addresses`, `area`, icône, couleur, renommage) :
+> réécrivent `groups.json` et rechargent à chaud (entités du groupe ajoutées/
+> « unavailable » immédiatement, sans attendre le polling).
 > Version : 0.48 — 2026-11-19 — §5.3 méthode 2 : `git subtree push` pousse sur la
 > branche **master** de `ha-dist` (convention GitFlow du projet — la branche `main`
 > créée par erreur sur le dépôt distant a été supprimée).
@@ -1288,6 +1293,48 @@ de luminaires » pour la photopériode d'un groupe via son schedule.
 > `groups.json` (`--groups`, ou `dashboards/groups.json` par défaut) : une seule
 > source de vérité pour les groupes, partagée entre l'intégration (runtime) et
 > les dashboards générés.
+
+#### 6.8.1 Créer / modifier / supprimer un groupe depuis l'UI (sans éditer de JSON)
+
+Les services **`phs16lc.set_group`** et **`phs16lc.remove_group`** sont faits pour
+ça : appelez-les depuis **Réglages → Outils de développement → Actions** (le
+formulaire propose les bons sélecteurs : multi-sélection des luminaires, liste
+déroulante des pièces, sélecteur d'icône), ou depuis un bouton de dashboard /
+une automatisation. Ils réécrivent `<config>/phs16lc/groups.json` et le
+coordinator recharge le fichier **à chaud** : les entités du groupe apparaissent
+(ou passent « unavailable ») immédiatement, sans attendre le prochain polling
+ni redémarrer.
+
+```yaml
+# Créer un groupe (ou modifier ses membres) — les deux champs membres se
+# remplacent mutuellement ; `spots` = multi-sélection de light.spot_* dans l'UI :
+service: phs16lc.set_group
+data:
+  group_id: serre_1_nord          # créé si inconnu ; [A-Za-z0-9_-]
+  name: "Serre 1 — Nord"           # omis = inchangé (création : = group_id)
+  spots: [light.spot_1, light.spot_2]   # OU addresses: "1,2"  ("all" = tous les SPOT)
+  color: "#4CAF50"                 # badge ; chaîne vide = efface ; omis = inchangé
+  icon: mdi:leaf
+  area: serre_1                    # pièce posée sur les devices membres + le groupe
+  # new_group_id: serre_1_rangee_nord   # renommer
+  # port: /dev/ttyUSB0                  # bus cible si plusieurs entrées PHS16-LC
+```
+
+```yaml
+# Détacher un luminaire = le retirer de la sélection `spots` (la liste des
+# membres est remplacée par la sélection) ; supprimer le groupe :
+service: phs16lc.remove_group
+data:
+  group_id: serre_1_nord
+```
+
+Règles : mise à jour **partielle** (seuls les champs fournis changent) ; un groupe
+sans aucun membre est refusé ; une adresse pas encore scannée est acceptée (on
+peut définir le groupe avant que la carte soit en ligne) ; `port` cible le bus
+quand plusieurs entrées PHS16-LC existent (défaut : le bus qui connaît déjà le
+groupe, sinon le premier). Testé en E2E : création en < 10 ms, entités
+`light.<groupe>` / `select.<groupe>_recipe` / `button.<groupe>_save_to_nvm`
+créées à chaud.
 
 ### 6.9 Ergonomie de l'interface (modal « more-info » vs page appareil)
 

@@ -164,6 +164,62 @@
           "description": "0 = éteint, 74-2150 mA."
         }
       }
+    },
+    "set_group": {
+      "name": "Créer / modifier un groupe de luminaires",
+      "description": "Crée ou modifie un groupe de luminaires (membres, nom, couleur, icône, pièce) en réécrivant groups.json — rechargé à chaud, sans redémarrage. Appelez ce service depuis Outils de développement → Actions pour attacher ou détacher des luminaires d'un groupe depuis l'UI.",
+      "fields": {
+        "group_id": {
+          "name": "Identifiant du groupe",
+          "description": "Identifiant technique (A-Z a-z 0-9 _ -), ex. \"serre_1_nord\". Le groupe est créé s'il n'existe pas."
+        },
+        "new_group_id": {
+          "name": "Nouveau identifiant (renommer)",
+          "description": "Optionnel : renomme le groupe (les entités existantes suivent)."
+        },
+        "name": {
+          "name": "Nom affiché",
+          "description": "Optionnel : nom du groupe (vide = retombe sur l'identifiant). Non fourni = inchangé."
+        },
+        "spots": {
+          "name": "Luminaires membres",
+          "description": "Sélection multiple de lampes SPOT (light.spot_*) : remplace la liste des membres du groupe (attacher/détacher)."
+        },
+        "addresses": {
+          "name": "Adresses (texte)",
+          "description": "Alternative à `spots` : adresses séparées par des virgules (ex. \"1,2,3\") ou \"all\" (tous les SPOT connus). Remplace la liste des membres."
+        },
+        "color": {
+          "name": "Couleur du badge",
+          "description": "Couleur du label HA (ex. \"#4CAF50\"). Vide = efface. Non fourni = inchangé."
+        },
+        "icon": {
+          "name": "Icône du badge",
+          "description": "Icône du label HA (ex. \"mdi:leaf\"). Vide = efface. Non fourni = inchangé."
+        },
+        "area": {
+          "name": "Pièce (area)",
+          "description": "Pièce posée sur les devices membres et le device du groupe. Vide = efface. Non fourni = inchangé."
+        },
+        "port": {
+          "name": "Bus (port série)",
+          "description": "Optionnel : bus cible quand plusieurs entrées PHS16-LC existent (ex. \"/dev/ttyUSB0\"). Défaut : le bus qui connaît déjà le groupe, sinon le premier."
+        }
+      }
+    },
+    "remove_group": {
+      "name": "Supprimer un groupe de luminaires",
+      "description": "Supprime un groupe de luminaires de groups.json (rechargé à chaud). Ses entités passent « unavailable » ; les luminaires eux-mêmes ne sont pas touchés.",
+      "fields": {
+        "group_id": {
+          "name": "Identifiant du groupe",
+          "description": "Identifiant du groupe à supprimer, ex. \"serre_1_nord\"."
+        },
+        "port": {
+          "name": "Bus (port série)",
+          "description": "Optionnel : bus cible quand plusieurs entrées PHS16-LC existent. Défaut : le bus qui connaît le groupe, sinon le premier."
+        }
+      }
     }
   }
 }

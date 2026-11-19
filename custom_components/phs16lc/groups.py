@@ -41,7 +41,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-_GROUP_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+GROUP_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @dataclass
@@ -54,6 +54,18 @@ class GroupDef:
     color: str | None = None
     icon: str | None = None
     area: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Sérialise en entrée groups.json (ordre canonique, clés vides omises)."""
+        data: dict[str, Any] = {"name": self.name}
+        if self.color:
+            data["color"] = self.color
+        if self.icon:
+            data["icon"] = self.icon
+        if self.area:
+            data["area"] = self.area
+        data["addresses"] = list(self.addresses)
+        return data
 
 
 def load_groups(path: Path) -> dict[str, GroupDef]:
@@ -72,7 +84,7 @@ def load_groups(path: Path) -> dict[str, GroupDef]:
         return {}
     groups: dict[str, GroupDef] = {}
     for key, value in raw.items():
-        if not isinstance(key, str) or not _GROUP_ID_RE.match(key):
+        if not isinstance(key, str) or not GROUP_ID_RE.match(key):
             _LOGGER.warning("groups.json : identifiant de groupe invalide ignoré : %r", key)
             continue
         if not isinstance(value, dict):
@@ -100,6 +112,20 @@ def load_groups(path: Path) -> dict[str, GroupDef]:
             area=str(area) if area else None,
         )
     return groups
+
+
+def save_groups(path: Path, groups: dict[str, GroupDef]) -> None:
+    """Écrit groups.json de façon atomique (tmp + replace). À exécuter en executor.
+
+    Utilisé par les services `phs16lc.set_group` / `phs16lc.remove_group` pour
+    créer/modifier/supprimer des groupes depuis l'UI ; le fichier est ensuite
+    rechargé à chaud par le coordinator (voir `Phs16Coordinator.async_reload_groups_now`).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {gid: groups[gid].as_dict() for gid in sorted(groups)}
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
 
 
 @dataclass

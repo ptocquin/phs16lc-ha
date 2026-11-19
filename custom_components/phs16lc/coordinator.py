@@ -290,6 +290,17 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         if result.dirty:
             await self.async_io(save_sync_state, self.sync_state_path, self.sync_state)
 
+    async def async_reload_groups_now(self) -> None:
+        """Recharge groups.json immédiatement (sans attendre le prochain polling) et
+        notifie les listeners : les entités des nouveaux groupes sont ajoutées à
+        chaud, celles des groupes supprimés passent « unavailable ».
+
+        Appelé par les services `phs16lc.set_group` / `phs16lc.remove_group` après
+        réécriture du fichier.
+        """
+        await self._async_reload_groups()
+        self.async_update_listeners()
+
     async def _async_update_data(self) -> Phs16Data:
         await self._async_reload_groups()
         # si le port a disparu (B2), tente d'abord la reconnexion : UpdateFailed

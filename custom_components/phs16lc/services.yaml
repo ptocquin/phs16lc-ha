@@ -1,5 +1,10 @@
 # Services exposés par l'intégration PHS16-LC (handlers enregistrés en phase 6).
-# `address` accepte un numéro de carte ("1") ou "all" (toutes les cartes scannées).
+# `address` accepte un numéro de carte ("1"), "all" (toutes les cartes scannées)
+# ou "group:<id>" (groupe de luminaires de groups.json).
+#
+# set_group / remove_group : création/modification/suppression des groupes de
+# luminaires depuis l'UI (Outils de développement → Actions) — réécrivent
+# <config>/phs16lc/groups.json, rechargé à chaud par le coordinator.
 
 scan:
   fields: {}
@@ -71,3 +76,56 @@ set_channel:
           max: 2150
           step: 1
           mode: box
+
+set_group:
+  fields:
+    group_id:
+      required: true
+      selector:
+        text:
+    new_group_id:
+      required: false
+      selector:
+        text:
+    name:
+      required: false
+      selector:
+        text:
+    spots:
+      required: false
+      selector:
+        entity:
+          integration: phs16lc
+          domain: light
+          multiple: true
+    addresses:
+      required: false
+      selector:
+        text:
+    color:
+      required: false
+      selector:
+        text:
+    icon:
+      required: false
+      selector:
+        icon:
+    area:
+      required: false
+      selector:
+        area:
+    port:
+      required: false
+      selector:
+        text:
+
+remove_group:
+  fields:
+    group_id:
+      required: true
+      selector:
+        text:
+    port:
+      required: false
+      selector:
+        text:

@@ -164,6 +164,62 @@
           "description": "0 = off, 74-2150 mA."
         }
       }
+    },
+    "set_group": {
+      "name": "Create / edit a light group",
+      "description": "Creates or edits a group of luminaires (members, name, color, icon, area) by rewriting groups.json — hot-reloaded, no restart. Call this service from Developer tools → Actions to attach or detach luminaires to a group from the UI.",
+      "fields": {
+        "group_id": {
+          "name": "Group id",
+          "description": "Technical id (A-Z a-z 0-9 _ -), e.g. \"greenhouse_1_north\". Created if it does not exist."
+        },
+        "new_group_id": {
+          "name": "New id (rename)",
+          "description": "Optional: renames the group (existing entities follow)."
+        },
+        "name": {
+          "name": "Display name",
+          "description": "Optional: group name (empty = falls back to the id). Omitted = unchanged."
+        },
+        "spots": {
+          "name": "Member luminaires",
+          "description": "Multiple selection of SPOT lights (light.spot_*): replaces the group member list (attach/detach)."
+        },
+        "addresses": {
+          "name": "Addresses (text)",
+          "description": "Alternative to `spots`: comma-separated addresses (e.g. \"1,2,3\") or \"all\" (all known SPOTs). Replaces the member list."
+        },
+        "color": {
+          "name": "Badge color",
+          "description": "Color of the HA label (e.g. \"#4CAF50\"). Empty = clear. Omitted = unchanged."
+        },
+        "icon": {
+          "name": "Badge icon",
+          "description": "Icon of the HA label (e.g. \"mdi:leaf\"). Empty = clear. Omitted = unchanged."
+        },
+        "area": {
+          "name": "Area",
+          "description": "Area set on the member devices and the group device. Empty = clear. Omitted = unchanged."
+        },
+        "port": {
+          "name": "Bus (serial port)",
+          "description": "Optional: target bus when several PHS16-LC entries exist (e.g. \"/dev/ttyUSB0\"). Default: the bus that already knows the group, else the first one."
+        }
+      }
+    },
+    "remove_group": {
+      "name": "Remove a light group",
+      "description": "Removes a group of luminaires from groups.json (hot-reloaded). Its entities become unavailable; the luminaires themselves are untouched.",
+      "fields": {
+        "group_id": {
+          "name": "Group id",
+          "description": "Id of the group to remove, e.g. \"greenhouse_1_north\"."
+        },
+        "port": {
+          "name": "Bus (serial port)",
+          "description": "Optional: target bus when several PHS16-LC entries exist. Default: the bus that knows the group, else the first one."
+        }
+      }
     }
   }
 }
