@@ -35,7 +35,9 @@ Par carte SPOT (device « SPOT n », relié au hub « Adaptateur PHS16-LC ») :
 courants, `binary_sensor` présence.
 
 Services : `phs16lc.scan`, `phs16lc.apply_recipe`, `phs16lc.apply_scene`,
-`phs16lc.save`, `phs16lc.set_channels`, `phs16lc.set_channel`.
+`phs16lc.save`, `phs16lc.set_channels`, `phs16lc.set_channel`,
+`phs16lc.set_group` / `phs16lc.remove_group` (créer/modifier/supprimer un groupe
+de luminaires depuis l'UI — Outils de développement → Actions).
 
 ## Tableaux de bord et automatisations
 
