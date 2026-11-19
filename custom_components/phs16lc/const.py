@@ -29,6 +29,14 @@ EVENT_SCENE_APPLIED = f"{DOMAIN}_scene_applied"
 EVENT_SAVED = f"{DOMAIN}_saved"
 EVENT_SCANNED = f"{DOMAIN}_scan"
 EVENT_GROUP_RECIPE_APPLIED = f"{DOMAIN}_group_recipe_applied"
+EVENT_LINK_LOST = f"{DOMAIN}_link_lost"
+EVENT_RECONNECTED = f"{DOMAIN}_reconnected"
+
+# Reconnexion automatique du port série (B2) : après ce nombre d'erreurs I/O
+# consécutives (OSError pyserial, ex. adaptateur débranché à chaud) le port est
+# déclaré perdu puis rouvert à chaque cycle de polling, avec rescan de la ligne.
+LINK_ERROR_THRESHOLD = 3
+RECONNECT_MIN_DELAY = 5.0  # secondes min entre deux tentatives de réouverture
 
 # Groupes de luminaires (phase 10) : fichier groups.json à côté du dossier des recettes
 GROUPS_FILENAME = "groups.json"

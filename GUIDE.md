@@ -4,6 +4,11 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.47 — 2026-11-19 — §5.4 : le **port série et le port RX sont
+> modifiables dans les options** de l'entrée (sans la supprimer/recréer) ;
+> §7 : **reconnexion automatique** si l'adaptateur USB est débranché/rebranché
+> à chaud (entités « unavailable » puis retour auto + rescan, événements
+> `phs16lc_link_lost` / `phs16lc_reconnected` dans le logbook).
 > Version : 0.46 — 2026-11-18 — §6.8/§6.9 : ergonomie UI — le modal « more-info »
 > d'une lampe n'est pas extensible par une intégration (frontend HA core) ; le
 > dashboard généré rend tout **inline** par groupe (tuile lampe + select Recette
@@ -1054,6 +1059,13 @@ Réglages → Appareils et services → **Ajouter une intégration** → cherche
 # ou /config/phs16lc/... sur un conteneur classique.
 ```
 
+> **Changer de port sans supprimer l'entrée** : Réglages → Appareils et
+> services → PHS16-LC → **Configurer** (options) : le port série et le port RX
+> y sont modifiables ; la sauvegarde recharge l'intégration automatiquement
+> (l'ancien port est fermé, le nouveau ouvert, rescan de la ligne). Le port
+> reste l'identifiant unique de l'entrée : un doublon sur le même port est
+> refusé avec une erreur.
+>
 > **Listes vides / boutons « Scène » absents** : depuis la v1.3.0 les fichiers
 > par défaut sont copiés auto ; si le dossier a été supprimé ou si `recipes_dir`
 > est personnalisé et vide, les listes « Recette »/« Groupe » sont vides et aucun
@@ -1299,7 +1311,8 @@ de luminaires » pour la photopériode d'un groupe via son schedule.
 | Symptôme | Cause probable | Solution |
 | --- | --- | --- |
 | Aucune entité après l'ajout de l'intégration | Dossier mal copié / pas de redémarrage | Vérifier `/config/custom_components/phs16lc/manifest.json`, redémarrer HA, voir les logs (Réglages → Système → Journaux) |
-| « Impossible d'ouvrir le port » | Mauvais port, ou port déjà utilisé (CLI lancée en parallèle) | Choisir le bon port dans les options de l'intégration ; arrêter la CLI |
+| « Impossible d'ouvrir le port » | Mauvais port, ou port déjà utilisé (CLI lancée en parallèle) | Choisir le bon port dans les options de l'intégration (sans supprimer l'entrée) ; arrêter la CLI |
+| Entités « unavailable » puis tout redevient normal | Adaptateur USB débranché/rebranché à chaud | **Reconnexion automatique** : après 3 erreurs I/O consécutives le port est fermé, les entités passent « unavailable », puis le port est rouvert et la ligne rescannée à chaque cycle de polling dès qu'il réapparaît. Événements `phs16lc_link_lost` / `phs16lc_reconnected` visibles dans le logbook (Réglages → Système → Journaux → Logbook) |
 | `scan` trouve 0 carte | Alim 12–24 V absente du bus, mauvais port, ordre TX/RX inversé (dual) | Mesurer 12–24 V entre pins 3/6 (+) et 4/5 (masse) à la prise RJ45 du luminaire ; en boîtier dual, TX = port câblé sur pins 1-2, RX = pins 7-8 ; voir [`../GUIDE.md`](../GUIDE.md) §6 (inverser paires 1-2 ↔ 7-8) |
 | Carte « hors ligne » au milieu de la ligne | Trou dans le bus : le scan s'arrête au 1er silence | Renseigner « nombre de SPOT attendus » dans les options de l'intégration |
 | Changements perdus après coupure de courant | `@SP` volatile, pas de `@WP` | Bouton « Sauvegarder NVM », ou option `save: true` des services |

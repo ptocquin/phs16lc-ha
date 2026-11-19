@@ -12,7 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, recipes_dir_for_entry, scenes_dir_for
+from .const import DOMAIN, entry_value, recipes_dir_for_entry, scenes_dir_for
 from .coordinator import Phs16Coordinator
 from .entity import (
     Phs16Entity,
@@ -91,7 +91,7 @@ class HubButton(CoordinatorEntity[Phs16Coordinator], ButtonEntity):
         name: str | None = None,
     ) -> None:
         super().__init__(coordinator)
-        self._attr_device_info = hub_device_info(entry.entry_id, entry.data[CONF_PORT])
+        self._attr_device_info = hub_device_info(entry.entry_id, str(entry_value(entry, CONF_PORT)))
         self._attr_unique_id = f"{entry.entry_id}_{entity_key}"
         if translation_key is not None:
             self._attr_translation_key = translation_key

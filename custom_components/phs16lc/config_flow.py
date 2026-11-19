@@ -23,6 +23,7 @@ from .const import (
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
+    entry_value,
 )
 
 
@@ -34,6 +35,20 @@ def _detected_ports() -> list[SelectOptionDict]:
         SelectOptionDict(value=p.device, label=p.description or p.device)
         for p in list_ports.comports()
     ]
+
+
+def _port_selector(ports: list[SelectOptionDict], default: str) -> SelectSelector:
+    """Sélecteur de port série : ports détectés + saisie manuelle (custom_value)."""
+    options = list(ports)
+    if default and all(p["value"] != default for p in options):
+        options.append(SelectOptionDict(value=default, label=default))
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=options,
+            custom_value=True,  # saisie manuelle si aucun port détecté
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
 
 
 class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -61,13 +76,7 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_PORT,
                     default=ports[0]["value"] if ports else "/dev/ttyUSB0",
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=ports,
-                        custom_value=True,  # saisie manuelle si aucun port détecté
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
+                ): _port_selector(ports, ""),
                 # Montage dual (boîtier fabricant 2x USB-RS485-WE) : port TX ci-dessus,
                 # port RX ici. Vide = un seul convertisseur full duplex (TX = RX).
                 vol.Optional(CONF_RX_PORT, default=""): str,
@@ -89,20 +98,61 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class Phs16lcOptionsFlow(OptionsFlow):
-    """Modifie expected_spots / poll_interval / recipes_dir sans recréer l'entrée.
+    """Modifie port / rx_port / expected_spots / poll_interval / recipes_dir à chaud (B3).
 
     La sauvegarde déclenche le update listener enregistré dans __init__.py,
-    qui recharge l'entrée (nouveau coordinator avec le nouvel intervalle).
+    qui recharge l'entrée : nouveau coordinator, et nouveau port ouvert si le
+    port a changé (l'ancien est fermé au déchargement). Le unique_id (le port)
+    et le titre de l'entrée suivent le changement de port, pour continuer à
+    bloquer un doublon sur le même port physique.
     """
 
     async def async_step_init(
         self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
+        entry = self.config_entry
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            port = str(user_input[CONF_PORT]).strip()
+            rx_port = str(user_input.get(CONF_RX_PORT) or "").strip()
+            if rx_port == port:
+                rx_port = ""  # identique au port TX => montage à un seul port
+            if port != entry.unique_id:
+                conflict = next(
+                    (
+                        e
+                        for e in self.hass.config_entries.async_entries(DOMAIN)
+                        if e.entry_id != entry.entry_id and e.unique_id == port
+                    ),
+                    None,
+                )
+                if conflict is not None:
+                    schema = await self._build_schema(port, rx_port)
+                    return self.async_show_form(
+                        step_id="init", data_schema=schema, errors={"base": "already_configured"}
+                    )
+                # Le unique_id (le port) et le titre sont resynchronisés dans
+                # _async_update_listener (après sauvegarde des options) : un
+                # second entry sur ce port restera bloqué au config flow.
+            return self.async_create_entry(
+                data={**user_input, CONF_PORT: port, CONF_RX_PORT: rx_port}
+            )
+        schema = await self._build_schema(
+            str(entry_value(entry, CONF_PORT)), str(entry_value(entry, CONF_RX_PORT) or "")
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)
+
+    async def _build_schema(self, default_port: str, default_rx_port: str) -> vol.Schema:
+        """Schéma de l'options flow, pré-rempli avec les valeurs effectives courantes."""
+        ports = await self.hass.async_add_executor_job(_detected_ports)
         current = {**self.config_entry.data, **self.config_entry.options}
-        schema = vol.Schema(
+        return vol.Schema(
             {
+                vol.Required(
+                    CONF_PORT,
+                    default=default_port or (ports[0]["value"] if ports else "/dev/ttyUSB0"),
+                ): _port_selector(ports, default_port),
+                # Montage dual (boîtier fabricant 2x USB-RS485-WE) : port RX ici (B3).
+                vol.Optional(CONF_RX_PORT, default=default_rx_port): str,
                 vol.Required(
                     CONF_EXPECTED_SPOTS, default=int(current[CONF_EXPECTED_SPOTS])
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1_000_000)),
@@ -112,4 +162,3 @@ class Phs16lcOptionsFlow(OptionsFlow):
                 vol.Required(CONF_RECIPES_DIR, default=str(current[CONF_RECIPES_DIR])): str,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)

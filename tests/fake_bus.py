@@ -17,14 +17,24 @@ class FakeSpot:
 
 
 class FakePhsLink:
-    """Imite `PhsLink` : même constructeur (tx_port, rx_port=None, baudrate, trace)."""
+    """Imite `PhsLink` : même constructeur (tx_port, rx_port=None, baudrate, trace).
+
+    Flags de panne (B2) : `fail_open` fait lever OSError au constructeur (port
+    absent), `fail_io` fait lever OSError dans send() (port débranché à chaud).
+    """
 
     instances: list[FakePhsLink] = []
     bus: dict[int, FakeSpot] = {}
+    fail_open: bool = False
+    fail_io: bool = False
+    open_attempts: int = 0
 
     def __init__(
         self, tx_port: str, rx_port: str | None = None, baudrate: int = 115200, trace=None
     ) -> None:
+        type(self).open_attempts += 1
+        if type(self).fail_open:
+            raise OSError(19, "No such device")
         self.tx_port = tx_port
         self.rx_port = rx_port if rx_port else tx_port
         self.port = tx_port  # compat. ascendante (diagnostics)
@@ -37,8 +47,13 @@ class FakePhsLink:
     def reset(cls, bus: dict[int, FakeSpot]) -> None:
         cls.instances = []
         cls.bus = bus
+        cls.fail_open = False
+        cls.fail_io = False
+        cls.open_attempts = 0
 
     def send(self, cmd: str, addr: int, params: str = "", timeout: float = 0.0):
+        if type(self).fail_io:
+            raise OSError(19, "Device not configured")
         self.sent.append((cmd, addr, params))
         spot = self.bus.get(addr)
         if cmd == "GI":  # présence

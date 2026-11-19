@@ -13,24 +13,31 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_EXPECTED_SPOTS,
     CONF_POLL_INTERVAL,
+    CONF_PORT,
+    CONF_RX_PORT,
     DEFAULT_CHANNELS,
     DOMAIN,
     EVENT_GROUP_RECIPE_APPLIED,
+    EVENT_LINK_LOST,
     EVENT_RECIPE_APPLIED,
+    EVENT_RECONNECTED,
     EVENT_SAVED,
     EVENT_SCANNED,
     EVENT_SCENE_APPLIED,
+    LINK_ERROR_THRESHOLD,
+    RECONNECT_MIN_DELAY,
     entry_value,
     groups_file_for,
     recipes_dir_for_entry,
@@ -67,7 +74,7 @@ class SpotState:
 
 @dataclass
 class Phs16Data:
-    link: PhsLink
+    link: PhsLink | None  # None quand le port est déclaré perdu (B2, reconnexion auto)
     spots: dict[int, SpotState] = field(default_factory=dict)
 
 
@@ -117,11 +124,137 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.sync_state: dict[str, Any] = {}
         self.sync_state_path = sync_state_file_for(recipes_dir_for_entry(entry))
         self._io_lock = asyncio.Lock()
+        # Reconnexion automatique du port série (B2)
+        self._link_errors = 0
+        self._last_reconnect_attempt: float | None = None
 
     async def async_io(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Exécute `func(*args)` en executor, sérialisé (port série unique)."""
         async with self._io_lock:
             return await self.hass.async_add_executor_job(functools.partial(func, *args, **kwargs))
+
+    async def async_ensure_link(self) -> PhsLink:
+        """Retourne le lien série ouvert, en tentant une réouverture si le port a
+        disparu à chaud (B2). Lève UpdateFailed (HomeAssistantError) si le port
+        reste indisponible — les entités passent alors en « unavailable »."""
+        if self.link is not None:
+            return self.link
+        if await self._async_try_reconnect() and self.link is not None:
+            return self.link
+        port = str(entry_value(self.entry, CONF_PORT))
+        raise UpdateFailed(f"Port série {port} indisponible — reconnexion automatique en cours")
+
+    async def _link_io(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """I/O sur le lien série (executor + lock) avec détection de perte du port (B2).
+
+        Sur OSError (port débranché, etc.) : comptabilise l'erreur ; au seuil
+        LINK_ERROR_THRESHOLD le port est fermé et déclaré perdu (événement
+        `phs16lc_link_lost`), la réouverture sera tentée au prochain accès.
+        Lève UpdateFailed dans tous les cas (HomeAssistantError côté commandes).
+        """
+        link = await self.async_ensure_link()
+        try:
+            return await self.async_io(func, *args, **kwargs)
+        except OSError as exc:
+            await self._register_link_error(link, exc)
+            raise UpdateFailed(f"Port série {link.port} en erreur : {exc}") from exc
+
+    async def _register_link_error(self, link: PhsLink, exc: OSError) -> None:
+        """Comptabilise une erreur I/O du port ; au seuil, ferme le lien (B2)."""
+        self._link_errors += 1
+        if self._link_errors < LINK_ERROR_THRESHOLD:
+            _LOGGER.debug(
+                "Erreur I/O port série %s (%d/%d) : %s",
+                link.port,
+                self._link_errors,
+                LINK_ERROR_THRESHOLD,
+                exc,
+            )
+            return
+        _LOGGER.warning(
+            "Port série %s perdu après %d erreurs I/O consécutives (%s) — "
+            "fermeture, reconnexion automatique au prochain cycle de polling",
+            link.port,
+            self._link_errors,
+            exc,
+        )
+        self.hass.bus.async_fire(
+            EVENT_LINK_LOST,
+            {"port": link.port, "error": str(exc), "errors": self._link_errors},
+        )
+        self._link_errors = 0
+        if self.link is link:
+            self.link = None
+            if self.data is not None:
+                self.data.link = None
+        try:
+            await self.async_io(link.close)
+        except Exception:  # port déjà mort : close() peut aussi échouer
+            _LOGGER.debug("Fermeture du port perdu %s : %s", link.port, exc)
+
+    async def _async_try_reconnect(self) -> bool:
+        """Tente de rouvrir le port série puis de rescanner la ligne (B2).
+
+        Rate-limité à RECONNECT_MIN_DELAY s entre deux tentatives. Retourne True
+        si le lien est rétabli. Les états connus des cartes (last_recipe /
+        last_group, D11) sont conservés sur les cartes retrouvées.
+        """
+        now = time.monotonic()
+        if (
+            self._last_reconnect_attempt is not None
+            and now - self._last_reconnect_attempt < RECONNECT_MIN_DELAY
+        ):
+            return False
+        self._last_reconnect_attempt = now
+        port = str(entry_value(self.entry, CONF_PORT))
+        rx_port = str(entry_value(self.entry, CONF_RX_PORT) or "").strip() or None
+        if rx_port == port:
+            rx_port = None
+        try:
+            link = await self.hass.async_add_executor_job(PhsLink, port, rx_port)
+        except Exception as exc:
+            _LOGGER.debug("Réouverture du port %s impossible : %s", port, exc)
+            return False
+        expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
+        try:
+            addresses = await self.async_io(_rescan, link, expected)
+        except OSError as exc:
+            _LOGGER.debug("Scan après réouverture de %s échoué : %s", port, exc)
+            try:
+                await self.async_io(link.close)
+            except Exception:
+                pass
+            return False
+        old_spots = self.data.spots if self.data is not None else {}
+        spots: dict[int, SpotState] = {}
+        for a in addresses:
+            prev = old_spots.get(a)
+            spots[a] = SpotState(
+                address=a,
+                online=True,
+                last_recipe=prev.last_recipe if prev is not None else None,
+                last_group=prev.last_group if prev is not None else None,
+            )
+        for a, spot in old_spots.items():
+            if a not in spots:
+                spot.online = False
+                spots[a] = spot
+        self.link = link
+        if self.data is not None:
+            self.data.link = link
+            self.data.spots = spots
+        else:
+            self.data = Phs16Data(link=link, spots=spots)
+        _LOGGER.info(
+            "Port série %s réouvert automatiquement : %d carte(s) : %s",
+            port,
+            len(addresses),
+            addresses,
+        )
+        self.hass.bus.async_fire(
+            EVENT_RECONNECTED, {"port": port, "addresses": addresses, "count": len(addresses)}
+        )
+        return True
 
     async def _async_setup(self) -> None:
         """Scan initial de la ligne à la création du coordinator.
@@ -130,7 +263,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         `self.data` lui-même (ensuite `_async_update_data` est appelé).
         """
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
-        addresses = await self.async_io(_rescan, self.link, expected)
+        addresses = await self._link_io(_rescan, self.link, expected)
         _LOGGER.info("Scan initial PHS16-LC : %d carte(s) : %s", len(addresses), addresses)
         self.data = Phs16Data(
             link=self.link,
@@ -159,13 +292,17 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def _async_update_data(self) -> Phs16Data:
         await self._async_reload_groups()
-        await self.async_io(_poll_spots, self.link, self.data.spots)
+        # si le port a disparu (B2), tente d'abord la reconnexion : UpdateFailed
+        # sinon -> last_update_success False -> entités « unavailable »
+        link = await self.async_ensure_link()
+        await self._link_io(_poll_spots, link, self.data.spots)
         return self.data
 
     async def async_rescan(self) -> list[int]:
         """Rescan complet (bouton/service) : découvre les nouvelles cartes, marque les absentes."""
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
-        addresses = await self.async_io(_rescan, self.link, expected)
+        link = await self.async_ensure_link()
+        addresses = await self._link_io(_rescan, link, expected)
         for a in addresses:
             self.data.spots.setdefault(a, SpotState(address=a, online=True))
         for spot in self.data.spots.values():
@@ -182,8 +319,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     # ------------------------------------------------------------------
     async def async_set_channels(self, address: int, currents: list[int]) -> None:
         """Règle chaque canal d'une carte (@SP). Lève LuminaireError si la carte ne répond pas."""
-        lum = Luminaire(address=address, link=self.link, channels=len(currents))
-        await self.async_io(lum.set_channels, currents)
+        link = await self.async_ensure_link()
+        lum = Luminaire(address=address, link=link, channels=len(currents))
+        await self._link_io(lum.set_channels, currents)
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
 
@@ -195,14 +333,15 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         Tire l'événement `phs16lc_recipe_applied` (ok/erreur). Lève en cas d'échec.
         """
         recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
+        link = await self.async_ensure_link()
 
         def _do() -> None:
             recipe = Recipe.from_file(recipe_path)
-            lum = Luminaire(address=address, link=self.link)
+            lum = Luminaire(address=address, link=link)
             lum.apply_recipe(recipe, group=group)
 
         try:
-            await self.async_io(_do)
+            await self._link_io(_do)
         except (LuminaireError, OSError, ValueError, KeyError) as exc:
             self.hass.bus.async_fire(
                 EVENT_RECIPE_APPLIED,
@@ -227,9 +366,10 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def async_save(self, address: int) -> None:
         """Sauvegarde les courants en NVM (@WP). Tire `phs16lc_saved`. Lève LuminaireError."""
-        lum = Luminaire(address=address, link=self.link)
+        link = await self.async_ensure_link()
+        lum = Luminaire(address=address, link=link)
         try:
-            await self.async_io(lum.save)
+            await self._link_io(lum.save)
         except LuminaireError as exc:
             self.hass.bus.async_fire(
                 EVENT_SAVED, {"address": address, "ok": False, "error": str(exc)}
@@ -242,13 +382,14 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     async def async_apply_scene(self, scene_name: str, save: bool = False) -> list[CardResult]:
         """Applique un fichier de scène (dossier `scenes/` à côté de `recipes_dir`)."""
         scene_path = scenes_dir_for(recipes_dir_for_entry(self.entry)) / scene_name
+        link = await self.async_ensure_link()
 
         def _do() -> tuple[Scene, list[CardResult]]:
             scene = Scene.from_file(scene_path)
-            results = apply_scene(self.link, scene, scene_path, save=save)
+            results = apply_scene(link, scene, scene_path, save=save)
             return scene, results
 
-        scene, results = await self.async_io(_do)
+        scene, results = await self._link_io(_do)
         for target in scene.targets:
             if target.group is None:
                 for address in target.addresses:
@@ -296,14 +437,13 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         """
         addresses = self.group_addresses(group_id)
         recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
+        link = await self.async_ensure_link()
 
         def _do() -> dict[int, str | None]:
             recipe = Recipe.from_file(recipe_path)  # lève OSError/ValueError -> propagate
             results: dict[int, str | None] = {}
             for address in addresses:
-                lum = Luminaire(
-                    address=address, link=self.link, channels=self._member_channels(address)
-                )
+                lum = Luminaire(address=address, link=link, channels=self._member_channels(address))
                 try:
                     lum.apply_recipe(recipe, group=group)
                     results[address] = None
@@ -311,7 +451,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = str(exc)
             return results
 
-        results = await self.async_io(_do)
+        results = await self._link_io(_do)
         for address, error in results.items():
             spot = self.data.spots.get(address)
             if error is None and group is None and spot is not None:
@@ -344,11 +484,12 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     async def async_save_group(self, group_id: str) -> dict[int, str | None]:
         """@WP sur toutes les cartes du groupe. Retourne {address: erreur_ou_None}."""
         addresses = self.group_addresses(group_id)
+        link = await self.async_ensure_link()
 
         def _do() -> dict[int, str | None]:
             results: dict[int, str | None] = {}
             for address in addresses:
-                lum = Luminaire(address=address, link=self.link)
+                lum = Luminaire(address=address, link=link)
                 try:
                     lum.save()
                     results[address] = None
@@ -356,7 +497,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = str(exc)
             return results
 
-        results = await self.async_io(_do)
+        results = await self._link_io(_do)
         for address, error in results.items():
             self.hass.bus.async_fire(
                 EVENT_SAVED,
@@ -374,13 +515,14 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         (vecteur uniforme [ma] x nb_canaux de la carte). Retourne {address: erreur}.
         """
         addresses = self.group_addresses(group_id)
+        link = await self.async_ensure_link()
 
         def _do() -> dict[int, str | None]:
             results: dict[int, str | None] = {}
             for address in addresses:
                 n = self._member_channels(address)
                 vector = [currents] * n if isinstance(currents, int) else list(currents)
-                lum = Luminaire(address=address, link=self.link, channels=n)
+                lum = Luminaire(address=address, link=link, channels=n)
                 try:
                     if len(vector) != n:
                         results[address] = f"{n} canaux attendus, {len(vector)} fournis"
@@ -391,7 +533,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = str(exc)
             return results
 
-        results = await self.async_io(_do)
+        results = await self._link_io(_do)
         await self.async_refresh()
         return results
 
@@ -400,6 +542,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     ) -> dict[int, str | None]:
         """Règle un canal sur toutes les cartes du groupe (patch du vecteur courant)."""
         addresses = self.group_addresses(group_id)
+        link = await self.async_ensure_link()
 
         def _do() -> dict[int, str | None]:
             results: dict[int, str | None] = {}
@@ -414,7 +557,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = f"canal {channel} hors limites (1..{len(base)})"
                     continue
                 base[channel - 1] = ma
-                lum = Luminaire(address=address, link=self.link, channels=len(base))
+                lum = Luminaire(address=address, link=link, channels=len(base))
                 try:
                     lum.set_channels(base)
                     results[address] = None
@@ -422,7 +565,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = str(exc)
             return results
 
-        results = await self.async_io(_do)
+        results = await self._link_io(_do)
         await self.async_refresh()
         return results
 
@@ -431,12 +574,13 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         réapplique sa dernière recette, ou DEFAULT_CURRENT_MA si aucune."""
         addresses = self.group_addresses(group_id)
         recipes_dir = recipes_dir_for_entry(self.entry)
+        link = await self.async_ensure_link()
 
         def _do() -> dict[int, str | None]:
             results: dict[int, str | None] = {}
             for address in addresses:
                 n = self._member_channels(address)
-                lum = Luminaire(address=address, link=self.link, channels=n)
+                lum = Luminaire(address=address, link=link, channels=n)
                 spot = self.data.spots.get(address)
                 recipe_name = spot.last_recipe if spot is not None else None
                 try:
@@ -449,6 +593,6 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = str(exc)
             return results
 
-        results = await self.async_io(_do)
+        results = await self._link_io(_do)
         await self.async_refresh()
         return results

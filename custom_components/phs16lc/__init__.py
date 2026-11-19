@@ -95,8 +95,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     half duplex USB-RS485-WE, un sur la paire TX (pins 1-2), un sur la paire RX
     (pins 7-8). Vide ou identique au port TX => un seul convertisseur full duplex.
     """
-    port = entry.data[CONF_PORT]
-    rx_port = str(entry.data.get(CONF_RX_PORT) or "").strip() or None
+    # options (modifiées via l'options flow, B3) prioritaires sur data
+    port = str(entry_value(entry, CONF_PORT))
+    rx_raw = str(entry_value(entry, CONF_RX_PORT) or "").strip()
+    rx_port = rx_raw or None
+    if rx_port == port:
+        rx_port = None  # identique au port TX => montage à un seul port
     try:
         link = await hass.async_add_executor_job(PhsLink, port, rx_port)
     except Exception as exc:
@@ -197,6 +201,13 @@ def _warn_if_recipes_dir_missing(entry: Phs16lcConfigEntry) -> None:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> None:
+    # B3 : si le port a changé via l'options flow, le unique_id (le port) et le
+    # titre de l'entrée suivent — un doublon sur ce port reste bloqué. Fait ici
+    # (entrée stable, options déjà sauvegardées) et pas dans le flow, pour éviter
+    # une course avec le rechargement déclenché par la sauvegarde des options.
+    port = str(entry_value(entry, CONF_PORT))
+    if entry.unique_id != port:
+        hass.config_entries.async_update_entry(entry, unique_id=port, title=f"PHS16-LC {port}")
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -205,7 +216,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         coordinator: Phs16Coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await hass.async_add_executor_job(coordinator.link.close)
+        if coordinator.link is not None:  # None si le port était déclaré perdu (B2)
+            await hass.async_add_executor_job(coordinator.link.close)
         if not hass.data[DOMAIN]:
             async_unregister_services(hass)  # plus aucune entrée : retire les services
     return unload_ok

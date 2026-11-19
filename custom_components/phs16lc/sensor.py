@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, entry_value
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_spot_entities_listener, hub_device_info
 from .phs16ctl.controller import format_currents
@@ -97,7 +97,7 @@ class LineStatusSensor(CoordinatorEntity[Phs16Coordinator], SensorEntity):
 
     def __init__(self, coordinator: Phs16Coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_device_info = hub_device_info(entry.entry_id, entry.data[CONF_PORT])
+        self._attr_device_info = hub_device_info(entry.entry_id, str(entry_value(entry, CONF_PORT)))
         self._attr_unique_id = f"{entry.entry_id}_line_status"
 
     @property

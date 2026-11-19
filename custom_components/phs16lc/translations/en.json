@@ -28,13 +28,22 @@
     "step": {
       "init": {
         "title": "PHS16-LC options",
-        "description": "Applied live: the entry is reloaded automatically after saving.",
+        "description": "Applied live: the entry is reloaded automatically after saving. If the port changes, the old port is closed and the new one opened.",
         "data": {
+          "port": "Serial port",
+          "rx_port": "RX port (optional — dual box with 2x USB-RS485-WE)",
           "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence)",
           "poll_interval": "Polling interval (seconds, 5-60)",
           "recipes_dir": "Recipe folder (JSON)"
+        },
+        "data_description": {
+          "port": "Linux: /dev/ttyUSB0 (or /dev/phs16bus with a udev rule). macOS (dev): /dev/cu.usbserial-XXXX.",
+          "rx_port": "Empty = single full-duplex converter (TX = RX). Dual box: RX port here, TX port in \"Serial port\"."
         }
       }
+    },
+    "error": {
+      "already_configured": "This serial port is already used by another PHS16-LC entry."
     }
   },
   "entity": {

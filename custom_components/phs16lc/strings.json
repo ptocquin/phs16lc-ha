@@ -28,13 +28,22 @@
     "step": {
       "init": {
         "title": "Options PHS16-LC",
-        "description": "Modifié à chaud : l'entrée est rechargée automatiquement après sauvegarde.",
+        "description": "Modifié à chaud : l'entrée est rechargée automatiquement après sauvegarde. Si le port change, l'ancien port est fermé et le nouveau ouvert.",
         "data": {
+          "port": "Port série",
+          "rx_port": "Port RX (optionnel — boîtier dual 2x USB-RS485-WE)",
           "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence)",
           "poll_interval": "Intervalle de rafraîchissement (secondes, 5-60)",
           "recipes_dir": "Dossier des recettes lumineuses (JSON)"
+        },
+        "data_description": {
+          "port": "Linux : /dev/ttyUSB0 (ou /dev/phs16bus avec règle udev). macOS (dev) : /dev/cu.usbserial-XXXX.",
+          "rx_port": "Vide = un seul convertisseur full duplex (TX = RX). Boîtier dual : port RX ici, port TX dans « Port série »."
         }
       }
+    },
+    "error": {
+      "already_configured": "Ce port série est déjà utilisé par une autre entrée PHS16-LC."
     }
   },
   "entity": {

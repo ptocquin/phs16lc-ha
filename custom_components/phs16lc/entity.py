@@ -9,7 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_PORT, DOMAIN
+from .const import CONF_PORT, DOMAIN, entry_value
 from .coordinator import Phs16Coordinator
 
 
@@ -23,7 +23,7 @@ def ensure_hub_device(hass: HomeAssistant, entry) -> str:
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
-        name=f"PHS16-LC {entry.data[CONF_PORT]}",
+        name=f"PHS16-LC {entry_value(entry, CONF_PORT)}",
         manufacturer="Twin Development sa",
         model="Bus RS-485 PHS16-LC",
     )
