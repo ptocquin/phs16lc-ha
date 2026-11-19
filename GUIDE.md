@@ -4,6 +4,9 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.48 — 2026-11-19 — §5.3 méthode 2 : `git subtree push` pousse sur la
+> branche **master** de `ha-dist` (convention GitFlow du projet — la branche `main`
+> créée par erreur sur le dépôt distant a été supprimée).
 > Version : 0.47 — 2026-11-19 — §5.4 : le **port série et le port RX sont
 > modifiables dans les options** de l'entrée (sans la supprimer/recréer) ;
 > §7 : **reconnexion automatique** si l'adaptateur USB est débranché/rebranché
@@ -1003,19 +1006,19 @@ cd /Users/ptocquin/RunningProjects/phs16lc
 git remote add ha-dist https://github.com/ptocquin/phs16lc-ha.git
 
 # 2. Premier push : `git subtree push` construit un historique synthétique
-#    ne contenant QUE ha-integration/ et le pousse sur la branche main
-git subtree push --prefix=ha-integration ha-dist main
+#    ne contenant QUE ha-integration/ et le pousse sur la branche master
+git subtree push --prefix=ha-integration ha-dist master
 
 # 3. À chaque nouvelle version : bump de "version" dans
 #    ha-integration/custom_components/phs16lc/manifest.json, commit, tag vX.Y.Z,
 #    puis re-push :
-git subtree push --prefix=ha-integration ha-dist main
+git subtree push --prefix=ha-integration ha-dist master
 ```
 
 > HA ne lit que `hacs.json` et `custom_components/` à la racine du dépôt : les
 > fichiers auxiliaires poussés avec (`tests/`, `tools/`, `pyproject.toml`,
 > `dist/*.zip`) sont simplement ignorés. Ne pas initialiser le dépôt GitHub avec
-> un README (sinon le premier `subtree push` refusera de pousser sur `main`).
+> un README (sinon le premier `subtree push` refusera de pousser sur `master`).
 
 Dans HA (2026.11 : le **Marketplace est intégré** à Réglages, plus besoin de
 l'add-on HACS) : Réglages → Marketplace → ⋮ → **Dépôts personnalisés** → coller
