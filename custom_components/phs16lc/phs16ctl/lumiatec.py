@@ -245,33 +245,52 @@ def ge_ok(link: "PhsLink", address: int) -> bool | None:
     return bool(decoded and decoded[0] == "OK")
 
 
-def elect_master(addresses: list[int], link: "PhsLink | None" = None) -> int:
-    """Adresse du master du bus.
+def elect_master(addresses: list[int], link: "PhsLink | None" = None,
+                 prefer: int | None = None) -> int:
+    """Adresse du master du bus — assigné UNIQUEMENT à la (ré)initialisation du
+    réseau (scan/découverte), jamais en cours de route.
 
-    **Règle mesurée en production (2026-11-20)** : le fw exige que le master soit
-    le luminaire **physiquement premier sur le bus** (côté PC) — PAS la plus
-    petite adresse (les adresses 131/136 ne suivent pas l'ordre physique :
-    avec 131 master, `@GE` = ERR partout et aucune sortie PWM ; avec 136
-    master, `@GE` = OK). On élit donc par essai : chaque candidate est posée
-    master (power partout), et la première qui donne `@GE OK` est retenue.
+    **Règle mesurée en production (2026-11-20, bus 131/136)** : le fw exige que le
+    master soit le luminaire **physiquement premier sur le bus (côté PC)** — pas
+    forcément la plus petite adresse : avec 131 master, `@GE` = ERR chez l'autre
+    spot (0/10 lectures OK) et le slave reste noir malgré `@SC` ACKé ; avec 136
+    master, `@GE` = OK (8/10) et tout le bus s'allume. Un seul master à la fois :
+    chaque candidate réécrit le `@SF` de **tous** les spots (jamais 2 masters).
 
-    Sans `link` (hors ligne, ex. tests) : `min(addresses)`, comme le code
-    d'origine.
+    Élection : `prefer` (option explicite) si présent dans les adresses ; sinon
+    essai de chaque candidate par ordre croissant, validée si un **autre** spot
+    répond `@GE OK` (au moins 1 lecture OK sur 5 — un master invalide ne donne
+    jamais OK chez les autres ; ne pas sonder la candidate elle-même, son propre
+    `@GE` flapote quand le PWM tourne). Repli : `min(addresses)` (code d'origine)
+    si aucune candidate validée ou pas de `link`.
     """
     if not addresses:
         raise _controller_error("elect_master : aucune adresse fournie")
-    if link is None:
-        return min(addresses)
-    for candidate in sorted(addresses):
-        for a in addresses:
-            set_sf(link, a, sf_bitmask(True, a == candidate))
-        for _ in range(3):  # @GE OK validé ; une réponse manquante annule la candidate
-            ok = ge_ok(link, candidate)
-            if ok is True:
-                return candidate
-            if ok is None:
+    if link is None:  # hors ligne : pas d'élection possible
+        return prefer if prefer in addresses else min(addresses)
+    chosen = prefer if prefer in addresses else None
+    if chosen is None:
+        for candidate in sorted(addresses):
+            for a in addresses:
+                set_sf(link, a, sf_bitmask(True, a == candidate))
+            # sonde @GE chez les autres spots (pas chez la candidate)
+            for a in addresses:
+                if a == candidate:
+                    continue
+                for _ in range(5):
+                    if ge_ok(link, a) is True:
+                        chosen = candidate
+                        break
+                if chosen is not None:
+                    break
+            if chosen is not None:
                 break
-    return min(addresses)  # repli : aucun candidat validé par @GE
+    if chosen is None:
+        chosen = min(addresses)  # repli : aucun candidat validé par @GE
+    # applique l'assignation retenue : power partout, master sur un seul
+    for a in addresses:
+        set_sf(link, a, sf_bitmask(True, a == chosen))
+    return chosen
 
 
 def apply_power(addresses: list[int], link: "PhsLink", power: bool = True,
@@ -281,7 +300,7 @@ def apply_power(addresses: list[int], link: "PhsLink", power: bool = True,
     À appeler avant toute commande produisant de la lumière : sans power+master,
     le fw V1.3 acquitte (`@SC` -> ACK, `@GC` relit la valeur) mais ne sort pas
     de PWM. Un seul master par bus. `master_addr` : élu par défaut via
-    `elect_master(addresses, link)` (validation `@GE OK`).
+    `elect_master(addresses, link)` (validation `@GE OK` chez les autres spots).
     """
     if master_addr is None:
         master_addr = elect_master(addresses, link)

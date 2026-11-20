@@ -123,6 +123,20 @@ async def test_options_flow_has_family(hass: HomeAssistant, monkeypatch) -> None
     result = await hass.config_entries.options.async_init(entry.entry_id)
     keys = {str(k) for k in result["data_schema"].schema}
     assert "family" in keys
+    assert "master_addr" in keys
+
+
+async def test_lumiatec_master_addr_option_overrides_election(hass, monkeypatch) -> None:
+    """Option master_addr explicite : prioritaire sur l'élection auto @GE."""
+    bus = {131: FakeLumSpot(serial=0x14100083), 136: FakeLumSpot()}
+    # physical_first=None : l'auto élirait 131 (min) ; l'option force 136
+    flow_data = {**LUM_FLOW_DATA, "master_addr": 136, "recipes_dir": "/tmp/recipes"}
+    entry, coordinator = await _setup_lum(hass, monkeypatch, bus, flow_data=flow_data)
+    assert entry.data["master_addr"] == 136
+    assert coordinator._master_addr == 136
+    link = FakeLumLink.instances[-1]
+    sf = [(a, p) for c, a, p in link.sent if c == "SF"]
+    assert (136, "3") in sf and (131, "1") in sf
 
 
 # --- Polling + light ----------------------------------------------------------

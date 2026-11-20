@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_EXPECTED_SPOTS,
     CONF_FAMILY,
+    CONF_MASTER_ADDR,
     CONF_POLL_INTERVAL,
     CONF_PORT,
     CONF_RX_PORT,
@@ -277,10 +278,16 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         return True
 
     async def _async_elect_master(self, addresses: list[int]) -> None:
-        """Élit et mémorise le master lumiatec par validation `@GE OK` (bus réel)."""
+        """Élit et mémorise le master lumiatec — UNIQUEMENT à la découverte du
+        réseau (scan initial / rescan / reconnexion), jamais en cours de route.
+        Option `master_addr` (0 = auto) prioritaire ; sinon validation `@GE OK`
+        chez les autres spots (le fw exige le luminaire physiquement premier)."""
         if self.family == FAMILY_LUMIATEC and addresses:
-            self._master_addr = await self._link_io(lum.elect_master, addresses, self.link)
-            _LOGGER.info("Master lumiatec élu (@GE OK) : %s", self._master_addr)
+            prefer = int(entry_value(self.entry, CONF_MASTER_ADDR) or 0) or None
+            self._master_addr = await self._link_io(lum.elect_master, addresses, self.link, prefer)
+            _LOGGER.info(
+                "Master lumiatec élu : %s (option master_addr=%s)", self._master_addr, prefer
+            )
 
     async def _async_setup(self) -> None:
         """Scan initial de la ligne à la création du coordinator.

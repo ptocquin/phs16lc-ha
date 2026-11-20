@@ -80,6 +80,7 @@ async def _options(hass, entry, **overrides):
     data = {
         "port": str(entry.options.get("port", entry.data["port"])),
         "rx_port": str(entry.options.get("rx_port", entry.data.get("rx_port", "")) or ""),
+        "master_addr": int(entry.options.get("master_addr", entry.data.get("master_addr", 0))),
         "expected_spots": int(entry.options.get("expected_spots", entry.data["expected_spots"])),
         "poll_interval": int(entry.options.get("poll_interval", entry.data["poll_interval"])),
         "recipes_dir": str(entry.options.get("recipes_dir", entry.data["recipes_dir"])),
