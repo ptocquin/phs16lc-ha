@@ -22,15 +22,19 @@ l'intégration **PHS16-LC** (Réglages → Appareils et services).
 personnalisé dans Réglages → Marketplace, puis installer « PHS16-LC ».
 
 Au premier ajout, un formulaire demande : le **port série** (liste des ports détectés,
-avec détection USB de l'adaptateur FTDI VID `0403` PID `6001`), le **nombre de SPOT
-attendus**, l'**intervalle de rafraîchissement** (le protocole ne pousse pas d'état :
-les courants/températures sont relus par polling) et le **dossier des recettes**
+avec détection USB de l'adaptateur FTDI VID `0403` PID `6001` ou CH340 VID `1A86`
+PID `7523`), la **famille de luminaires** (`phs16-lc` par défaut, ou `lumiatec` pour
+la gamme Twindev/GDTech sur bus half duplex 2 fils — un port = une famille, voir
+`../PLAN_LUMIATEC.md`), le **nombre de SPOT attendus**, l'**intervalle de
+rafraîchissement** (le protocole ne pousse pas d'état : les courants/températures
+sont relus par polling) et le **dossier des recettes**
 (`/config/phs16lc/recipes` par défaut — y copier les `recipes/*.json` du projet).
 
 ## Entités
 
 Par carte SPOT (device « SPOT n », relié au hub « Adaptateur PHS16-LC ») :
-`light` (on/off + luminosité 1–100 % → 74–2150 mA), `select` recette, `select` groupe,
+`light` (on/off + luminosité 1–100 % → 74–2150 mA en phs16-lc, → step 1..87 × 5,7 mA
+≈ 6–496 mA en lumiatec), `select` recette, `select` groupe,
 `button` sauvegarder NVM / scènes / scan, `sensor` températures (CPU, LED 1, LED 2) +
 courants, `binary_sensor` présence.
 
