@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+import voluptuous as vol
 from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -36,9 +37,11 @@ async def test_options_flow_shows_form_with_current_values(hass, monkeypatch, tm
     defaults = {}
     for k in result["data_schema"].schema:
         d = k.default
-        defaults[str(k)] = (
-            d() if callable(d) else d
-        )  # voluptuous récent : default peut être une factory
+        if d is not vol.UNDEFINED:
+            defaults[str(k)] = d() if callable(d) else d  # default peut être une factory
+        else:
+            # pas de default= : pré-remplissage via suggested_value (ex. rx_port)
+            defaults[str(k)] = (k.description or {}).get("suggested_value")
     assert defaults["poll_interval"] == 10
     assert defaults["expected_spots"] == 1
     assert defaults["recipes_dir"] == str(tmp_path)
@@ -129,6 +132,37 @@ async def test_options_dual_box_rx_port_opens_two_ports(hass, monkeypatch, tmp_p
     assert link.tx_port == "/dev/fake0"
     assert link.rx_port == "/dev/fake1"
     assert not link.single_port
+
+
+async def test_options_clearing_rx_port_empties_it(hass, monkeypatch, tmp_path) -> None:
+    """Régression (prod 2026-11-20) : vider le champ RX dans l'options flow doit vider rx_port.
+
+    Le frontend omet la clé quand le champ optionnel est vidé ; avec un `default=`
+    voluptuous, l'ancienne valeur était réinjectée et re-sauvegardée. On soumet
+    donc SANS la clé rx_port, comme le fait le frontend.
+    """
+    entry, _ = await _setup(hass, monkeypatch, tmp_path)
+    result = await _options(hass, entry, rx_port="/dev/fake1")  # montage dual
+    await hass.async_block_till_done()
+    assert entry.options["rx_port"] == "/dev/fake1"
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    data = {
+        "port": "/dev/fake0",
+        # "rx_port" volontairement absent : champ vidé côté frontend
+        "expected_spots": 1,
+        "poll_interval": 10,
+        "recipes_dir": str(tmp_path),
+    }
+    result = await hass.config_entries.options.async_configure(result["flow_id"], data)
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options["rx_port"] == ""  # vidé, pas réinjecté
+    link = FakePhsLink.instances[-1]
+    assert link.single_port  # retour au montage à un seul port
+    assert entry.state == ConfigEntryState.LOADED
 
 
 async def test_options_port_conflict_with_other_entry_shows_error(

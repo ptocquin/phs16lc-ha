@@ -163,7 +163,11 @@ class Phs16lcOptionsFlow(OptionsFlow):
                     default=default_port or (ports[0]["value"] if ports else "/dev/ttyUSB0"),
                 ): _port_selector(ports, default_port),
                 # Montage dual (boîtier fabricant 2x USB-RS485-WE) : port RX ici (B3).
-                vol.Optional(CONF_RX_PORT, default=default_rx_port): str,
+                # suggested_value (et PAS default=) : quand le champ est vidé côté
+                # frontend, la clé est omise à la soumission — avec un default=
+                # voluptuous réinjecterait l'ancienne valeur et on ne pourrait
+                # jamais repasser en montage à un seul port (bug prod 2026-11-20).
+                vol.Optional(CONF_RX_PORT, description={"suggested_value": default_rx_port}): str,
                 vol.Required(
                     CONF_EXPECTED_SPOTS, default=int(current[CONF_EXPECTED_SPOTS])
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1_000_000)),
