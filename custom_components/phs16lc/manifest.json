@@ -13,7 +13,12 @@
     {
       "vid": "0403",
       "pid": "6001",
-      "description": "FTDI USB-RS422-WE (adaptateur RS-485 full duplex 4 fils pour bus PHS16-LC)"
+      "description": "FTDI USB-RS422-WE (bus PHS16-LC full duplex 4 fils) ou USB-RS485-WE 652302 (bus lumiatec half-duplex 2 fils)"
+    },
+    {
+      "vid": "1A86",
+      "pid": "7523",
+      "description": "CH340 USB-RS485 (bus lumiatec half-duplex 2 fils)"
     }
   ],
   "version": "1.4.0"

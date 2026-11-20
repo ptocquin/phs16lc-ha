@@ -30,7 +30,12 @@ class FakePhsLink:
     open_attempts: int = 0
 
     def __init__(
-        self, tx_port: str, rx_port: str | None = None, baudrate: int = 115200, trace=None
+        self,
+        tx_port: str,
+        rx_port: str | None = None,
+        baudrate: int = 115200,
+        trace=None,
+        dialect=None,
     ) -> None:
         type(self).open_attempts += 1
         if type(self).fail_open:
@@ -39,6 +44,7 @@ class FakePhsLink:
         self.rx_port = rx_port if rx_port else tx_port
         self.port = tx_port  # compat. ascendante (diagnostics)
         self.single_port = self.rx_port == self.tx_port
+        self.dialect = dialect  # None = REVD (phs16-lc) ; LUMIATEC pour la gamme lumiatec
         self.closed = False
         self.sent: list[tuple[str, int, str]] = []
         FakePhsLink.instances.append(self)

@@ -24,10 +24,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_EXPECTED_SPOTS,
+    CONF_FAMILY,
     CONF_POLL_INTERVAL,
     CONF_PORT,
     CONF_RX_PORT,
     DEFAULT_CHANNELS,
+    DEFAULT_FAMILY,
     DOMAIN,
     EVENT_GROUP_RECIPE_APPLIED,
     EVENT_LINK_LOST,
@@ -36,6 +38,7 @@ from .const import (
     EVENT_SAVED,
     EVENT_SCANNED,
     EVENT_SCENE_APPLIED,
+    FAMILY_LUMIATEC,
     LINK_ERROR_THRESHOLD,
     RECONNECT_MIN_DELAY,
     entry_value,
@@ -45,10 +48,10 @@ from .const import (
     sync_state_file_for,
 )
 from .groups import GroupDef, load_groups, load_sync_state, save_sync_state, sync_group_registries
+from .phs16ctl import lumiatec as lum
 from .phs16ctl.controller import (
     DEFAULT_CURRENT_MA,
     CardResult,
-    Luminaire,
     LuminaireError,
     Recipe,
     Scene,
@@ -56,6 +59,7 @@ from .phs16ctl.controller import (
     scan_line,
 )
 from .phs16ctl.link import T_GI, PhsLink
+from .phs16ctl.lumiatec import LUMIATEC
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ class Phs16Data:
     spots: dict[int, SpotState] = field(default_factory=dict)
 
 
-def _poll_spots(link: PhsLink, spots: dict[int, SpotState]) -> None:
+def _poll_spots(link: PhsLink, spots: dict[int, SpotState], family: str = DEFAULT_FAMILY) -> None:
     """Batch de polling, exécuté en un seul job executor (un seul thread sur le port)."""
     for spot in spots.values():
         spot.online = link.send("GI", spot.address, timeout=T_GI) is not None
@@ -86,19 +90,25 @@ def _poll_spots(link: PhsLink, spots: dict[int, SpotState]) -> None:
             spot.currents = None
             spot.temperatures = None
             continue
-        lum = Luminaire(address=spot.address, link=link)
+        dev = lum.make_luminaire(family, spot.address, link)
         try:
-            spot.currents = lum.read_currents()
+            spot.currents = dev.read_currents()
         except LuminaireError:
             spot.currents = None
         try:
-            spot.temperatures = lum.read_temperatures()
+            spot.temperatures = dev.read_temperatures()
         except LuminaireError:
             spot.temperatures = None
 
 
-def _rescan(link: PhsLink, expected: int) -> list[int]:
-    """Scan complet de la ligne (exécuté en executor)."""
+def _rescan(link: PhsLink, expected: int, family: str = DEFAULT_FAMILY) -> list[int]:
+    """Scan complet de la ligne (exécuté en executor).
+
+    lumiatec : adresses non contiguës (ex. 131, 136) -> balayage 1..expected
+    (255 si expected == 0), sans arrêt au premier silence.
+    """
+    if family == FAMILY_LUMIATEC:
+        return lum.scan_line(link, expected=expected or 255, timeout=lum.T_SCAN)
     return scan_line(link, expected=expected)
 
 
@@ -114,6 +124,8 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         )
         self.entry = entry
         self.link = link
+        #: famille de luminaires du bus de cette entrée ("phs16-lc" ou "lumiatec")
+        self.family = str(entry_value(entry, CONF_FAMILY) or DEFAULT_FAMILY)
         #: id registry du device hub, renseigné par `async_setup_entry` (entity.ensure_hub_device)
         self.hub_device_id: str = ""
         #: groupes de luminaires chargés depuis groups.json (rechargés à chaque polling, D20)
@@ -210,14 +222,17 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         rx_port = str(entry_value(self.entry, CONF_RX_PORT) or "").strip() or None
         if rx_port == port:
             rx_port = None
+        dialect = LUMIATEC if self.family == FAMILY_LUMIATEC else None
         try:
-            link = await self.hass.async_add_executor_job(PhsLink, port, rx_port)
+            link = await self.hass.async_add_executor_job(
+                functools.partial(PhsLink, port, rx_port, dialect=dialect)
+            )
         except Exception as exc:
             _LOGGER.debug("Réouverture du port %s impossible : %s", port, exc)
             return False
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
         try:
-            addresses = await self.async_io(_rescan, link, expected)
+            addresses = await self.async_io(_rescan, link, expected, self.family)
         except OSError as exc:
             _LOGGER.debug("Scan après réouverture de %s échoué : %s", port, exc)
             try:
@@ -263,7 +278,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         `self.data` lui-même (ensuite `_async_update_data` est appelé).
         """
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
-        addresses = await self._link_io(_rescan, self.link, expected)
+        addresses = await self._link_io(_rescan, self.link, expected, self.family)
         _LOGGER.info("Scan initial PHS16-LC : %d carte(s) : %s", len(addresses), addresses)
         self.data = Phs16Data(
             link=self.link,
@@ -306,14 +321,14 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         # si le port a disparu (B2), tente d'abord la reconnexion : UpdateFailed
         # sinon -> last_update_success False -> entités « unavailable »
         link = await self.async_ensure_link()
-        await self._link_io(_poll_spots, link, self.data.spots)
+        await self._link_io(_poll_spots, link, self.data.spots, self.family)
         return self.data
 
     async def async_rescan(self) -> list[int]:
         """Rescan complet (bouton/service) : découvre les nouvelles cartes, marque les absentes."""
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
         link = await self.async_ensure_link()
-        addresses = await self._link_io(_rescan, link, expected)
+        addresses = await self._link_io(_rescan, link, expected, self.family)
         for a in addresses:
             self.data.spots.setdefault(a, SpotState(address=a, online=True))
         for spot in self.data.spots.values():
@@ -329,10 +344,15 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     # Commandes (phases 2+ : light, select, button, services)
     # ------------------------------------------------------------------
     async def async_set_channels(self, address: int, currents: list[int]) -> None:
-        """Règle chaque canal d'une carte (@SP). Lève LuminaireError si la carte ne répond pas."""
+        """Règle chaque canal d'une carte (@SP en phs16-lc, N x @SC en lumiatec).
+
+        Lève LuminaireError si la carte ne répond pas.
+        """
         link = await self.async_ensure_link()
-        lum = Luminaire(address=address, link=link, channels=len(currents))
-        await self._link_io(lum.set_channels, currents)
+        dev = self._lum(link, address, power=any(c > 0 for c in currents))
+        if self.family != FAMILY_LUMIATEC:
+            dev.channels = len(currents)
+        await self._link_io(dev.set_channels, currents)
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
 
@@ -348,8 +368,8 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
         def _do() -> None:
             recipe = Recipe.from_file(recipe_path)
-            lum = Luminaire(address=address, link=link)
-            lum.apply_recipe(recipe, group=group)
+            dev = self._lum(link, address, power=True)
+            dev.apply_recipe(recipe, group=group)
 
         try:
             await self._link_io(_do)
@@ -378,9 +398,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     async def async_save(self, address: int) -> None:
         """Sauvegarde les courants en NVM (@WP). Tire `phs16lc_saved`. Lève LuminaireError."""
         link = await self.async_ensure_link()
-        lum = Luminaire(address=address, link=link)
+        dev = self._lum(link, address)
         try:
-            await self._link_io(lum.save)
+            await self._link_io(dev.save)
         except LuminaireError as exc:
             self.hass.bus.async_fire(
                 EVENT_SAVED, {"address": address, "ok": False, "error": str(exc)}
@@ -397,7 +417,11 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
         def _do() -> tuple[Scene, list[CardResult]]:
             scene = Scene.from_file(scene_path)
-            results = apply_scene(link, scene, scene_path, save=save)
+            if self.family == FAMILY_LUMIATEC:
+                # Sans power+master, le fw lumiatec n'allume rien (voir _lum).
+                targets = [a for t in scene.targets for a in t.addresses]
+                lum.apply_power(targets, link, power=True)
+            results = apply_scene(link, scene, scene_path, save=save, family=self.family)
             return scene, results
 
         scene, results = await self._link_io(_do)
@@ -436,6 +460,29 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             return len(spot.currents)
         return DEFAULT_CHANNELS
 
+    def _lum(self, link: PhsLink, address: int, power: bool = False, channels: int | None = None):
+        """Contrôleur de carte adapté à la famille de l'entrée.
+
+        `power=True` (lumiatec uniquement) : positionne power+master via `@SF`
+        avant la commande — sans power+master, le fw lumiatec acquitte mais ne
+        sort pas de PWM. Le master est la plus petite adresse scannée.
+        `channels` : nb de canaux attendu (phs16-lc ; en lumiatec, lu depuis le spot).
+        """
+        kwargs: dict = {}
+        if self.family == FAMILY_LUMIATEC:
+            spots = self.data.spots if self.data is not None else {}
+            master_addr = min(spots, default=address)
+            kwargs = {
+                "master": address == master_addr,
+                "channels": channels or self._member_channels(address),
+            }
+        elif channels is not None:
+            kwargs["channels"] = channels
+        dev = lum.make_luminaire(self.family, address, link, **kwargs)
+        if power and self.family == FAMILY_LUMIATEC:
+            dev.set_power(power=True)
+        return dev
+
     async def async_apply_recipe_to_group(
         self, group_id: str, recipe_name: str, group: str | None = None
     ) -> dict[int, str | None]:
@@ -454,9 +501,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             recipe = Recipe.from_file(recipe_path)  # lève OSError/ValueError -> propagate
             results: dict[int, str | None] = {}
             for address in addresses:
-                lum = Luminaire(address=address, link=link, channels=self._member_channels(address))
+                dev = self._lum(link, address, power=True)
                 try:
-                    lum.apply_recipe(recipe, group=group)
+                    dev.apply_recipe(recipe, group=group)
                     results[address] = None
                 except LuminaireError as exc:
                     results[address] = str(exc)
@@ -500,9 +547,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         def _do() -> dict[int, str | None]:
             results: dict[int, str | None] = {}
             for address in addresses:
-                lum = Luminaire(address=address, link=link)
+                dev = self._lum(link, address)
                 try:
-                    lum.save()
+                    dev.save()
                     results[address] = None
                 except LuminaireError as exc:
                     results[address] = str(exc)
@@ -533,12 +580,12 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             for address in addresses:
                 n = self._member_channels(address)
                 vector = [currents] * n if isinstance(currents, int) else list(currents)
-                lum = Luminaire(address=address, link=link, channels=n)
+                dev = self._lum(link, address, power=any(c > 0 for c in vector), channels=n)
                 try:
                     if len(vector) != n:
                         results[address] = f"{n} canaux attendus, {len(vector)} fournis"
                     else:
-                        lum.set_channels(vector)
+                        dev.set_channels(vector)
                         results[address] = None
                 except LuminaireError as exc:
                     results[address] = str(exc)
@@ -568,9 +615,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                     results[address] = f"canal {channel} hors limites (1..{len(base)})"
                     continue
                 base[channel - 1] = ma
-                lum = Luminaire(address=address, link=link, channels=len(base))
+                dev = self._lum(link, address, power=ma > 0, channels=len(base))
                 try:
-                    lum.set_channels(base)
+                    dev.set_channels(base)
                     results[address] = None
                 except LuminaireError as exc:
                     results[address] = str(exc)
@@ -591,14 +638,14 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             results: dict[int, str | None] = {}
             for address in addresses:
                 n = self._member_channels(address)
-                lum = Luminaire(address=address, link=link, channels=n)
+                dev = self._lum(link, address, power=True, channels=n)
                 spot = self.data.spots.get(address)
                 recipe_name = spot.last_recipe if spot is not None else None
                 try:
                     if recipe_name:
-                        lum.apply_recipe(Recipe.from_file(recipes_dir / recipe_name))
+                        dev.apply_recipe(Recipe.from_file(recipes_dir / recipe_name))
                     else:
-                        lum.set_channels([DEFAULT_CURRENT_MA] * n)
+                        dev.set_channels([DEFAULT_CURRENT_MA] * n)
                     results[address] = None
                 except (LuminaireError, OSError, ValueError, KeyError) as exc:
                     results[address] = str(exc)

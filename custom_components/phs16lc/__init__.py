@@ -9,6 +9,7 @@ doit pas tourner en parallèle sur le même port.
 
 from __future__ import annotations
 
+import functools
 import logging
 from pathlib import Path
 
@@ -19,10 +20,13 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    CONF_FAMILY,
     CONF_RECIPES_DIR,
     CONF_RX_PORT,
+    DEFAULT_FAMILY,
     DEFAULT_RECIPES_DIR,
     DOMAIN,
+    FAMILY_LABELS,
     GROUPS_FILENAME,
     entry_value,
     recipes_dir_for_entry,
@@ -31,6 +35,7 @@ from .const import (
 from .coordinator import Phs16Coordinator
 from .entity import ensure_hub_device
 from .phs16ctl.link import PhsLink
+from .phs16ctl.lumiatec import FAMILY_LUMIATEC, LUMIATEC
 from .services import async_register_services, async_unregister_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -101,8 +106,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: Phs16lcConfigEntry) -> b
     rx_port = rx_raw or None
     if rx_port == port:
         rx_port = None  # identique au port TX => montage à un seul port
+    family = str(entry_value(entry, CONF_FAMILY) or DEFAULT_FAMILY)
+    dialect = LUMIATEC if family == FAMILY_LUMIATEC else None  # None = REVD (phs16-lc)
     try:
-        link = await hass.async_add_executor_job(PhsLink, port, rx_port)
+        link = await hass.async_add_executor_job(
+            functools.partial(PhsLink, port, rx_port, dialect=dialect)
+        )
     except Exception as exc:
         # Port absent ou déjà ouvert (ex: CLI phs16ctl en parallèle) -> retry auto
         which = port if not rx_port else f"{port} (TX) / {rx_port} (RX)"
@@ -206,8 +215,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: Phs16lcConfigEntry)
     # (entrée stable, options déjà sauvegardées) et pas dans le flow, pour éviter
     # une course avec le rechargement déclenché par la sauvegarde des options.
     port = str(entry_value(entry, CONF_PORT))
+    family = str(entry_value(entry, CONF_FAMILY) or DEFAULT_FAMILY)
     if entry.unique_id != port:
-        hass.config_entries.async_update_entry(entry, unique_id=port, title=f"PHS16-LC {port}")
+        hass.config_entries.async_update_entry(
+            entry, unique_id=port, title=f"{FAMILY_LABELS.get(family, family)} {port}"
+        )
     await hass.config_entries.async_reload(entry.entry_id)
 
 

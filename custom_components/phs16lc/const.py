@@ -6,6 +6,7 @@ from pathlib import Path
 
 from homeassistant.const import CONF_PORT  # noqa: F401  (réexporté pour les autres modules)
 
+from .phs16ctl.lumiatec import FAMILY_LUMIATEC, FAMILY_PHS16LC, STEP_MA, STEP_MAX
 from .phs16ctl.protocol import CURRENT_MAX_MA, CURRENT_MIN_MA
 
 DOMAIN = "phs16lc"
@@ -16,6 +17,11 @@ CONF_RX_PORT = "rx_port"
 CONF_EXPECTED_SPOTS = "expected_spots"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_RECIPES_DIR = "recipes_dir"
+# Famille de luminaires sur le bus : "phs16-lc" (défaut) ou "lumiatec"
+CONF_FAMILY = "family"
+DEFAULT_FAMILY = FAMILY_PHS16LC
+#: Titre d'entrée par famille.
+FAMILY_LABELS = {FAMILY_PHS16LC: "PHS16-LC", FAMILY_LUMIATEC: "lumiatec"}
 
 DEFAULT_POLL_INTERVAL = 10
 MIN_POLL_INTERVAL = 5
@@ -101,18 +107,38 @@ def entry_value(entry, key: str):
     return entry.options.get(key, entry.data.get(key))
 
 
-def brightness_to_ma(brightness: int) -> int:
-    """Luminosité HA 1..255 → courant 74..2150 mA (linéaire) ; 0 → 0 (éteint)."""
+def min_on_ma(family: str = DEFAULT_FAMILY) -> int:
+    """Courant minimal (mA) pour qu'un canal soit considéré allumé.
+
+    phs16-lc : 74 mA (en dessous, le canal est éteint). lumiatec : 1 mA
+    (step 0 = éteint, step 1 = 5,7 mA).
+    """
+    return 1 if family == FAMILY_LUMIATEC else CURRENT_MIN_MA
+
+
+def brightness_to_ma(brightness: int, family: str = DEFAULT_FAMILY) -> int:
+    """Luminosité HA 1..255 → courant (linéaire) ; 0 → 0 (éteint).
+
+    phs16-lc : 74..2150 mA. lumiatec : step 1..87 x 5,7 mA, soit ~6..496 mA.
+    """
     if brightness <= 0:
         return 0
+    if family == FAMILY_LUMIATEC:
+        step = max(1, round(STEP_MAX * brightness / 255))
+        return max(1, round(step * STEP_MA))
     return round(CURRENT_MIN_MA + (CURRENT_MAX_MA - CURRENT_MIN_MA) * brightness / 255)
 
 
-def ma_to_brightness(ma: int) -> int:
+def ma_to_brightness(ma: int, family: str = DEFAULT_FAMILY) -> int:
     """Courant mA → luminosité HA 0..255 (inverse de brightness_to_ma).
 
-    Un canal allumé (≥ 74 mA) donne au moins brightness 1, même à 74 mA.
+    Un canal allumé donne au moins brightness 1.
     """
+    if family == FAMILY_LUMIATEC:
+        if ma < 1:
+            return 0
+        step = min(STEP_MAX, max(1, round(ma / STEP_MA)))
+        return max(1, round(step * 255 / STEP_MAX))
     if ma < CURRENT_MIN_MA:
         return 0
     return max(1, round((ma - CURRENT_MIN_MA) * 255 / (CURRENT_MAX_MA - CURRENT_MIN_MA)))

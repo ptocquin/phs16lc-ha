@@ -19,11 +19,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEFAULT_CHANNELS, DOMAIN, brightness_to_ma, ma_to_brightness
+from .const import DEFAULT_CHANNELS, DOMAIN, brightness_to_ma, ma_to_brightness, min_on_ma
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_group_entities_listener, group_device_info
 from .phs16ctl.controller import DEFAULT_CURRENT_MA, LuminaireError
-from .phs16ctl.protocol import CURRENT_MIN_MA
 
 
 async def async_setup_entry(
@@ -68,6 +67,7 @@ class SpotLight(Phs16Entity, LightEntity):
 
     def __init__(self, coordinator: Phs16Coordinator, address: int) -> None:
         super().__init__(coordinator, address, entity_key="light")
+        self._family = coordinator.family  # mapping luminosité et seuil « on » par famille
 
     def _spot(self):
         return self.coordinator.data.spots.get(self.address)
@@ -85,14 +85,14 @@ class SpotLight(Phs16Entity, LightEntity):
             return False
         if spot.currents is None:
             return None
-        return any(c >= CURRENT_MIN_MA for c in spot.currents)
+        return any(c >= min_on_ma(self._family) for c in spot.currents)
 
     @property
     def brightness(self) -> int | None:
         spot = self._spot()
         if spot is None or not spot.online or spot.currents is None:
             return None
-        return ma_to_brightness(max(spot.currents))
+        return ma_to_brightness(max(spot.currents), self._family)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         spot = self._spot()
@@ -100,7 +100,7 @@ class SpotLight(Phs16Entity, LightEntity):
             return
         try:
             if ATTR_BRIGHTNESS in kwargs:
-                ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]))
+                ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]), self._family)
                 await self.coordinator.async_set_channels(self.address, [ma] * self._channels())
             elif spot.last_recipe:
                 await self.coordinator.async_apply_recipe(self.address, spot.last_recipe)
@@ -157,8 +157,9 @@ class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
         spots = self._spots()
         if not spots:
             return None
+        threshold = min_on_ma(self.coordinator.family)
         return any(
-            s.online and s.currents and any(c >= CURRENT_MIN_MA for c in s.currents) for s in spots
+            s.online and s.currents and any(c >= threshold for c in s.currents) for s in spots
         )
 
     @property
@@ -166,7 +167,7 @@ class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
         spots = [s for s in self._spots() if s.online and s.currents]
         if not spots:
             return None
-        return ma_to_brightness(max(max(s.currents) for s in spots))
+        return ma_to_brightness(max(max(s.currents) for s in spots), self.coordinator.family)
 
     async def _run_group(self, coro) -> None:
         try:
@@ -181,7 +182,7 @@ class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         if ATTR_BRIGHTNESS in kwargs:
-            ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]))
+            ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]), self.coordinator.family)
             await self._run_group(self.coordinator.async_set_channels_group(self._group_id, ma))
         else:
             # D11 appliqué au groupe : dernière recette de chaque membre, sinon 500 mA

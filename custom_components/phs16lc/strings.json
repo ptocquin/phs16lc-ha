@@ -5,13 +5,15 @@
         "title": "PHS16-LC",
         "description": "Bus RS-485 full duplex des luminaires PHS16-LC. Branchez l'adaptateur USB-RS422 (FTDI) avant de continuer.",
         "data": {
+          "family": "Famille de luminaires",
           "port": "Port série",
-          "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence)",
+          "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence ; lumiatec : balayage complet 1..255)",
           "poll_interval": "Intervalle de rafraîchissement (secondes, 5-60)",
           "recipes_dir": "Dossier des recettes lumineuses (JSON)",
           "rx_port": "RX serial port (optional — dual box with 2x USB-RS485-WE)"
         },
         "data_description": {
+          "family": "phs16-lc = bus RS-485 full duplex 4 fils (défaut) ; lumiatec = bus half-duplex 2 fils (ex. FTDI USB-RS485-WE 652302, pas d'alim 12 V sur le bus). Un port = une seule famille.",
           "port": "Linux : /dev/ttyUSB0 (ou /dev/phs16bus avec règle udev). macOS (dev) : /dev/cu.usbserial-XXXX.",
           "expected_spots": "Indiquez le nombre total de luminaires pour détecter une carte HS au milieu de la ligne.",
           "poll_interval": "Le protocole PHS16-LC ne pousse pas d'état : les courants et températures sont relus à cet intervalle.",
@@ -30,9 +32,10 @@
         "title": "Options PHS16-LC",
         "description": "Modifié à chaud : l'entrée est rechargée automatiquement après sauvegarde. Si le port change, l'ancien port est fermé et le nouveau ouvert.",
         "data": {
+          "family": "Famille de luminaires",
           "port": "Port série",
           "rx_port": "Port RX (optionnel — boîtier dual 2x USB-RS485-WE)",
-          "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence)",
+          "expected_spots": "Nombre de SPOT attendus (0 = le scan s'arrête au premier silence ; lumiatec : balayage complet 1..255)",
           "poll_interval": "Intervalle de rafraîchissement (secondes, 5-60)",
           "recipes_dir": "Dossier des recettes lumineuses (JSON)"
         },

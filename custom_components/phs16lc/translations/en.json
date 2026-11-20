@@ -5,8 +5,9 @@
         "title": "PHS16-LC",
         "description": "RS-485 full-duplex bus of PHS16-LC luminaires. Plug in the USB-RS422 (FTDI) adapter before continuing.",
         "data": {
+          "family": "Lighting family",
           "port": "Serial port",
-          "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence)",
+          "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence; lumiatec: full 1..255 sweep)",
           "poll_interval": "Polling interval (seconds, 5-60)",
           "recipes_dir": "Recipe folder (JSON)",
           "rx_port": "RX serial port (optional — dual box with 2x USB-RS485-WE)"
@@ -30,9 +31,10 @@
         "title": "PHS16-LC options",
         "description": "Applied live: the entry is reloaded automatically after saving. If the port changes, the old port is closed and the new one opened.",
         "data": {
+          "family": "Lighting family",
           "port": "Serial port",
           "rx_port": "RX port (optional — dual box with 2x USB-RS485-WE)",
-          "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence)",
+          "expected_spots": "Expected number of SPOTs (0 = scan stops at first silence; lumiatec: full 1..255 sweep)",
           "poll_interval": "Polling interval (seconds, 5-60)",
           "recipes_dir": "Recipe folder (JSON)"
         },

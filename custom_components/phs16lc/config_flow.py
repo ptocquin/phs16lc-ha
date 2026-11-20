@@ -15,16 +15,20 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_EXPECTED_SPOTS,
+    CONF_FAMILY,
     CONF_POLL_INTERVAL,
     CONF_RECIPES_DIR,
     CONF_RX_PORT,
+    DEFAULT_FAMILY,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECIPES_DIR,
     DOMAIN,
+    FAMILY_LABELS,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
     entry_value,
 )
+from .phs16ctl.lumiatec import FAMILIES
 
 
 def _detected_ports() -> list[SelectOptionDict]:
@@ -65,14 +69,18 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
             rx_port = str(user_input.get(CONF_RX_PORT) or "").strip()
             if rx_port == port:
                 rx_port = ""  # identique au port TX => montage à un seul port
+            family = str(user_input.get(CONF_FAMILY) or DEFAULT_FAMILY)
             await self.async_set_unique_id(port)
             self._abort_if_unique_id_configured()
-            data = {**user_input, CONF_PORT: port, CONF_RX_PORT: rx_port}
-            return self.async_create_entry(title=f"PHS16-LC {port}", data=data)
+            data = {**user_input, CONF_PORT: port, CONF_RX_PORT: rx_port, CONF_FAMILY: family}
+            return self.async_create_entry(
+                title=f"{FAMILY_LABELS.get(family, family)} {port}", data=data
+            )
 
         ports = await self.hass.async_add_executor_job(_detected_ports)
         schema = vol.Schema(
             {
+                vol.Required(CONF_FAMILY, default=DEFAULT_FAMILY): vol.In(list(FAMILIES)),
                 vol.Required(
                     CONF_PORT,
                     default=ports[0]["value"] if ports else "/dev/ttyUSB0",
@@ -147,6 +155,9 @@ class Phs16lcOptionsFlow(OptionsFlow):
         current = {**self.config_entry.data, **self.config_entry.options}
         return vol.Schema(
             {
+                vol.Required(
+                    CONF_FAMILY, default=str(current.get(CONF_FAMILY, DEFAULT_FAMILY))
+                ): vol.In(list(FAMILIES)),
                 vol.Required(
                     CONF_PORT,
                     default=default_port or (ports[0]["value"] if ports else "/dev/ttyUSB0"),
