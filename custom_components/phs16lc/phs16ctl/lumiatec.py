@@ -38,7 +38,7 @@ LUMIATEC = Dialect(name="lumiatec", addr_hex=False, chk_hex=False, echo_filter=T
 BAUDRATE = 115200
 
 # Timeouts (s) — mesurés sur bus réel : réponses < 50 ms, @SV lent (> 0,6 s).
-T_SCAN = 0.5     # @GI pendant le scan (silence = adresse absente / fin de ligne)
+T_SCAN = 0.2     # @GI pendant le scan (silence = adresse absente), comme PHS16-LC
 T_DEFAULT = 1.0  # lecture/écriture standard (code d'origine : 1 s uniforme)
 T_SV = 2.0       # @SV : écriture EEPROM, ACK observé après plus de 0,6 s
 
@@ -232,6 +232,19 @@ def elect_master(addresses: list[int]) -> int:
     if not addresses:
         raise _controller_error("elect_master : aucune adresse fournie")
     return min(addresses)
+
+
+def apply_power(addresses: list[int], link: "PhsLink", power: bool = True) -> None:
+    """Positionne le bit power sur tous les luminaires, et master sur l'élu (`elect_master`).
+
+    À appeler avant toute commande produisant de la lumière : sans power+master,
+    le fw V1.3 acquitte (`@SC` -> ACK, `@GC` relit la valeur) mais ne sort pas
+    de PWM. Un seul master par bus.
+    """
+    master_addr = elect_master(addresses)
+    for a in addresses:
+        dev = LuminaireLumiatec(a, link, master=(a == master_addr))
+        dev.set_power(power=power)
 
 
 class LuminaireLumiatec:

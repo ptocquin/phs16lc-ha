@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import lumiatec as lum
 from . import protocol as proto
 from .link import T_GI, T_GP, T_GT, T_SP, T_WP, PhsLink
 
@@ -320,11 +321,14 @@ def apply_scene(
     scene: Scene,
     scene_path: str | Path,
     save: bool = False,
+    family: str = lum.FAMILY_PHS16LC,
 ) -> list[CardResult]:
     """Applique chaque cible de la scène, carte par carte.
 
     Une carte en erreur n'interrompt pas les autres : le résultat est
-    rapporté individuellement. `save=True` envoie `@WP` après chaque carte.
+    rapporté individuellement. `save=True` envoie la sauvegarde NVM après
+    chaque carte (`@WP` en phs16-lc, `@SV` en lumiatec). `family` choisit le
+    contrôleur de cartes (défaut `phs16-lc`).
     """
     scene_path = Path(scene_path)
     results: list[CardResult] = []
@@ -336,11 +340,11 @@ def apply_scene(
                 results.append(CardResult(a, False, f"recette illisible : {exc}"))
             continue
         for a in target.addresses:
-            lum = Luminaire(address=a, link=link)
+            dev = lum.make_luminaire(family, a, link)
             try:
-                lum.apply_recipe(recipe, group=target.group)
+                dev.apply_recipe(recipe, group=target.group)
                 if save:
-                    lum.save()
+                    dev.save()
             except LuminaireError as exc:
                 results.append(CardResult(a, False, str(exc), recipe=recipe.name, group=target.group or ""))
                 continue
