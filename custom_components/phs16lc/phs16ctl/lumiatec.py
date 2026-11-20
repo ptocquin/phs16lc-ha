@@ -227,24 +227,66 @@ def scan_line(link: "PhsLink", expected: int = 0, max_addr: int = 255,
     return found
 
 
-def elect_master(addresses: list[int]) -> int:
-    """Adresse du master du bus : la plus petite adresse présente (code d'origine : min(spots))."""
+def set_sf(link: "PhsLink", address: int, bitmask: int) -> None:
+    """@SF <bitmask> sur un luminaire (ACK exigé)."""
+    resp = link.send("SF", address, str(bitmask), timeout=T_DEFAULT)
+    if resp is None:
+        raise _controller_error(f"Pas de réponse @SF à l'adresse {address}")
+    if resp.is_nak:
+        raise _controller_error(f"@SF refusé (adresse {address}) : {resp.error}")
+
+
+def ge_ok(link: "PhsLink", address: int) -> bool | None:
+    """@GE sur un luminaire : True si `OK`, False si `ERR`, None si pas de réponse."""
+    resp = link.send("GE", address, timeout=T_DEFAULT)
+    if resp is None:
+        return None
+    decoded = decode_ge(resp)
+    return bool(decoded and decoded[0] == "OK")
+
+
+def elect_master(addresses: list[int], link: "PhsLink | None" = None) -> int:
+    """Adresse du master du bus.
+
+    **Règle mesurée en production (2026-11-20)** : le fw exige que le master soit
+    le luminaire **physiquement premier sur le bus** (côté PC) — PAS la plus
+    petite adresse (les adresses 131/136 ne suivent pas l'ordre physique :
+    avec 131 master, `@GE` = ERR partout et aucune sortie PWM ; avec 136
+    master, `@GE` = OK). On élit donc par essai : chaque candidate est posée
+    master (power partout), et la première qui donne `@GE OK` est retenue.
+
+    Sans `link` (hors ligne, ex. tests) : `min(addresses)`, comme le code
+    d'origine.
+    """
     if not addresses:
         raise _controller_error("elect_master : aucune adresse fournie")
-    return min(addresses)
+    if link is None:
+        return min(addresses)
+    for candidate in sorted(addresses):
+        for a in addresses:
+            set_sf(link, a, sf_bitmask(True, a == candidate))
+        for _ in range(3):  # @GE OK validé ; une réponse manquante annule la candidate
+            ok = ge_ok(link, candidate)
+            if ok is True:
+                return candidate
+            if ok is None:
+                break
+    return min(addresses)  # repli : aucun candidat validé par @GE
 
 
-def apply_power(addresses: list[int], link: "PhsLink", power: bool = True) -> None:
-    """Positionne le bit power sur tous les luminaires, et master sur l'élu (`elect_master`).
+def apply_power(addresses: list[int], link: "PhsLink", power: bool = True,
+                master_addr: int | None = None) -> None:
+    """Positionne le bit power sur tous les luminaires, et master sur l'élu.
 
     À appeler avant toute commande produisant de la lumière : sans power+master,
     le fw V1.3 acquitte (`@SC` -> ACK, `@GC` relit la valeur) mais ne sort pas
-    de PWM. Un seul master par bus.
+    de PWM. Un seul master par bus. `master_addr` : élu par défaut via
+    `elect_master(addresses, link)` (validation `@GE OK`).
     """
-    master_addr = elect_master(addresses)
+    if master_addr is None:
+        master_addr = elect_master(addresses, link)
     for a in addresses:
-        dev = LuminaireLumiatec(a, link, master=(a == master_addr))
-        dev.set_power(power=power)
+        set_sf(link, a, sf_bitmask(power, a == master_addr))
 
 
 class LuminaireLumiatec:

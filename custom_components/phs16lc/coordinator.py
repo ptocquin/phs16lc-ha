@@ -126,6 +126,10 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.link = link
         #: famille de luminaires du bus de cette entrée ("phs16-lc" ou "lumiatec")
         self.family = str(entry_value(entry, CONF_FAMILY) or DEFAULT_FAMILY)
+        #: master lumiatec élu par validation @GE OK (mis à jour à chaque rescan) —
+        #: PAS la plus petite adresse : le fw exige le luminaire physiquement premier
+        #: sur le bus (mesuré en prod 2026-11-20, adresses 131/136 -> master 136)
+        self._master_addr: int | None = None
         #: id registry du device hub, renseigné par `async_setup_entry` (entity.ensure_hub_device)
         self.hub_device_id: str = ""
         #: groupes de luminaires chargés depuis groups.json (rechargés à chaque polling, D20)
@@ -269,7 +273,14 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.hass.bus.async_fire(
             EVENT_RECONNECTED, {"port": port, "addresses": addresses, "count": len(addresses)}
         )
+        await self._async_elect_master(addresses)
         return True
+
+    async def _async_elect_master(self, addresses: list[int]) -> None:
+        """Élit et mémorise le master lumiatec par validation `@GE OK` (bus réel)."""
+        if self.family == FAMILY_LUMIATEC and addresses:
+            self._master_addr = await self._link_io(lum.elect_master, addresses, self.link)
+            _LOGGER.info("Master lumiatec élu (@GE OK) : %s", self._master_addr)
 
     async def _async_setup(self) -> None:
         """Scan initial de la ligne à la création du coordinator.
@@ -279,6 +290,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         """
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
         addresses = await self._link_io(_rescan, self.link, expected, self.family)
+        await self._async_elect_master(addresses)
         _LOGGER.info("Scan initial PHS16-LC : %d carte(s) : %s", len(addresses), addresses)
         self.data = Phs16Data(
             link=self.link,
@@ -329,6 +341,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
         link = await self.async_ensure_link()
         addresses = await self._link_io(_rescan, link, expected, self.family)
+        await self._async_elect_master(addresses)
         for a in addresses:
             self.data.spots.setdefault(a, SpotState(address=a, online=True))
         for spot in self.data.spots.values():
@@ -349,7 +362,8 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         Lève LuminaireError si la carte ne répond pas.
         """
         link = await self.async_ensure_link()
-        dev = self._lum(link, address, power=any(c > 0 for c in currents))
+        # _lum en executor : il fait du I/O série (@SF) si power=True
+        dev = await self._link_io(self._lum, link, address, power=any(c > 0 for c in currents))
         if self.family != FAMILY_LUMIATEC:
             dev.channels = len(currents)
         await self._link_io(dev.set_channels, currents)
@@ -420,7 +434,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             if self.family == FAMILY_LUMIATEC:
                 # Sans power+master, le fw lumiatec n'allume rien (voir _lum).
                 targets = [a for t in scene.targets for a in t.addresses]
-                lum.apply_power(targets, link, power=True)
+                lum.apply_power(targets, link, power=True, master_addr=self._master_addr)
             results = apply_scene(link, scene, scene_path, save=save, family=self.family)
             return scene, results
 
@@ -465,13 +479,16 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
         `power=True` (lumiatec uniquement) : positionne power+master via `@SF`
         avant la commande — sans power+master, le fw lumiatec acquitte mais ne
-        sort pas de PWM. Le master est la plus petite adresse scannée.
+        sort pas de PWM. Le master est l'élu `@GE OK` (`self._master_addr`, élu
+        au rescan), pas forcément la plus petite adresse.
         `channels` : nb de canaux attendu (phs16-lc ; en lumiatec, lu depuis le spot).
         """
         kwargs: dict = {}
         if self.family == FAMILY_LUMIATEC:
             spots = self.data.spots if self.data is not None else {}
-            master_addr = min(spots, default=address)
+            master_addr = (
+                self._master_addr if self._master_addr is not None else min(spots, default=address)
+            )
             kwargs = {
                 "master": address == master_addr,
                 "channels": channels or self._member_channels(address),

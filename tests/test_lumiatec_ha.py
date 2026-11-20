@@ -42,8 +42,10 @@ async def _setup_lum(
     monkeypatch: pytest.MonkeyPatch,
     bus: dict[int, FakeLumSpot],
     flow_data=None,
+    physical_first: int | None = None,
 ):
     FakeLumLink.reset(bus)
+    FakeLumLink.physical_first = physical_first
     monkeypatch.setattr("custom_components.phs16lc.PhsLink", FakeLumLink)
     monkeypatch.setattr("custom_components.phs16lc.coordinator.PhsLink", FakeLumLink)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -170,6 +172,26 @@ async def test_light_turn_on_lumiatec_master_sends_sf3(hass, monkeypatch) -> Non
     assert ("SF", 131, "3") in [(c, a, p) for c, a, p in link.sent if c == "SF"]
     assert ("SC", 131, "0 87 0 200") in [(c, a, p) for c, a, p in link.sent if c == "SC"]
     assert hass.states.get(light_id).attributes["brightness"] == 255
+
+
+async def test_lumiatec_master_elected_by_ge_not_min_address(hass, monkeypatch) -> None:
+    """Prod 2026-11-20 : le master est le spot physiquement premier (validé @GE OK),
+    pas la plus petite adresse — sur le bus 131/136 c'est 136, pas 131."""
+    bus = {131: FakeLumSpot(serial=0x14100083), 136: FakeLumSpot()}
+    # seul un master posé sur 136 (physiquement premier) donne @GE OK
+    entry, coordinator = await _setup_lum(hass, monkeypatch, bus, physical_first=136)
+    assert coordinator._master_addr == 136  # élu au scan initial via @GE
+    light_id = _light_id(hass, entry, 131)
+    await hass.services.async_call(
+        LIGHT_DOMAIN, "turn_on", {"entity_id": light_id, "brightness": 128}, blocking=True
+    )
+    await hass.async_block_till_done()
+    link = FakeLumLink.instances[-1]
+    sf = [(a, p) for c, a, p in link.sent if c == "SF"]
+    assert (131, "1") in sf  # 131 = slave (power seul)
+    assert (136, "3") in sf  # 136 = master (power+master)
+    sc = [(a, p) for c, a, p in link.sent if c == "SC"]
+    assert all(a == 131 for a, _ in sc)  # seuls les canaux de 131 sont réglés
 
 
 async def test_light_turn_off_lumiatec(hass, monkeypatch) -> None:
