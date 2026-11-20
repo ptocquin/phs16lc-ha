@@ -23,7 +23,14 @@ Différences vs PHS16-LC RevD (`protocol.REVD`) :
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from . import protocol as proto
 from .protocol import Dialect, Response, build_frame
+
+if TYPE_CHECKING:
+    from .controller import Recipe
+    from .link import PhsLink
 
 #: Dialect lumiatec : adresse décimale, checksum requête décimal, filtre d'écho.
 LUMIATEC = Dialect(name="lumiatec", addr_hex=False, chk_hex=False, echo_filter=True)
@@ -183,3 +190,247 @@ def decode_led_descriptor(hexblob: str) -> dict:
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Couche contrôle (phase 2) — même API que controller.Luminaire
+# ---------------------------------------------------------------------------
+
+FAMILY_PHS16LC = "phs16-lc"
+FAMILY_LUMIATEC = "lumiatec"
+FAMILIES = (FAMILY_PHS16LC, FAMILY_LUMIATEC)
+
+#: Courant par défaut pour `on()` (mA) — comme controller.DEFAULT_CURRENT_MA.
+DEFAULT_CURRENT_MA = 500
+
+
+def _controller_error(msg: str) -> Exception:
+    """LuminaireError du controller (import tardif : évite le cycle controller <-> lumiatec)."""
+    from .controller import LuminaireError
+
+    return LuminaireError(msg)
+
+
+def scan_line(link: "PhsLink", expected: int = 0, max_addr: int = 255,
+              timeout: float = T_SCAN) -> list[int]:
+    """Énumère les adresses présentes sur la ligne lumiatec.
+
+    Les adresses lumiatec ne sont **pas contiguës** (ex. 131, 136) : pas
+    d'arrêt au premier silence. `expected > 0` balaie 1..expected ; sinon
+    1..max_addr (défaut 255).
+    """
+    found: list[int] = []
+    top = expected if expected > 0 else max_addr
+    for address in range(1, top + 1):
+        if link.send("GI", address, timeout=timeout) is not None:
+            found.append(address)
+    return found
+
+
+def elect_master(addresses: list[int]) -> int:
+    """Adresse du master du bus : la plus petite adresse présente (code d'origine : min(spots))."""
+    if not addresses:
+        raise _controller_error("elect_master : aucune adresse fournie")
+    return min(addresses)
+
+
+class LuminaireLumiatec:
+    """Un luminaire lumiatec adressé sur la ligne (fw V1.3 observé).
+
+    Même API que `controller.Luminaire` : `on` / `off` / `set_channels` /
+    `apply_recipe` / `save` / `read_currents` / `read_temperatures`.
+    Les canaux sont 0-based côté bus ; les courants sont exposés en **mA**
+    (step × 5,7, plafond 87) comme pour PHS16-LC, les recettes (1-based)
+    s'appliquent telles quelles.
+
+    Le lien (`link`) doit porter le dialect `LUMIATEC` (voir `make_link`).
+    `master=True` positionne le bit master de `@SF` — obligatoire pour la
+    sortie PWM, un seul master par bus (voir `elect_master`).
+    """
+
+    def __init__(self, address: int, link: "PhsLink", channels: int = N_CHANNELS,
+                 master: bool = False, currents: list[int] | None = None) -> None:
+        self.address = address
+        self.link = link
+        self.channels = channels
+        self.master = master
+        self.currents: list[int] = list(currents) if currents is not None else []
+
+    # ------------------------------------------------------------------
+    # Utilitaires
+    # ------------------------------------------------------------------
+    def _require_ack(self, resp: Response | None, what: str) -> Response:
+        if resp is None:
+            raise _controller_error(f"Pas de réponse {what} à l'adresse {self.address}")
+        if resp.is_nak:
+            raise _controller_error(f"{what} refusé (adresse {self.address}) : {resp.error}")
+        return resp
+
+    # ------------------------------------------------------------------
+    # Power / master (@SF)
+    # ------------------------------------------------------------------
+    def set_power(self, power: bool, master: bool | None = None) -> None:
+        """@SF : bit0 = power, bit1 = master (défaut = self.master)."""
+        m = self.master if master is None else master
+        resp = self.link.send("SF", self.address, str(sf_bitmask(power, m)), timeout=T_DEFAULT)
+        self._require_ack(resp, "@SF")
+
+    # ------------------------------------------------------------------
+    # Allumer / éteindre
+    # ------------------------------------------------------------------
+    def on(self, current_ma: int = DEFAULT_CURRENT_MA) -> None:
+        """Allume : power+master (@SF) puis tous les canaux à `current_ma`."""
+        self.set_power(power=True)
+        self.set_channels([current_ma] * self.channels)
+
+    def off(self) -> None:
+        """Éteint tous les canaux (step 0). Laisse power/master tels quels."""
+        self.set_channels([0] * self.channels)
+
+    def shutdown(self) -> None:
+        """Extinction complète : canaux à 0 + power OFF + master OFF (@SF 0)."""
+        self.set_channels([0] * self.channels)
+        self.set_power(power=False, master=False)
+
+    # ------------------------------------------------------------------
+    # Canaux
+    # ------------------------------------------------------------------
+    def set_channels(self, currents: list[int]) -> None:
+        """Programme les courants (mA) de chaque canal : N × @SC (volatil)."""
+        if len(currents) != self.channels:
+            raise _controller_error(
+                f"Luminaire {self.address} : {self.channels} canaux attendus, "
+                f"{len(currents)} reçus"
+            )
+        steps = [ma_to_step(ma) for ma in currents]
+        for ch, step in enumerate(steps):
+            resp = self.link.send("SC", self.address, f"{ch} {step} 0 200", timeout=T_DEFAULT)
+            self._require_ack(resp, "@SC")
+        self.currents = [round(step_to_ma(s)) for s in steps]
+
+    def apply_recipe(self, recipe: "Recipe", group: str | None = None) -> None:
+        """Applique une recette (mêmes fichiers JSON que PHS16-LC).
+
+        Sans `group` : recette complète. Avec `group` : lecture des courants
+        actuels (@GC), patch du groupe (canaux 1-based de la recette), renvoi.
+        """
+        if group is None:
+            self.set_channels(recipe.full_vector(self.channels))
+            return
+        g = recipe.group(group)
+        base = self.read_currents()
+        for c in g.channels:
+            if not 1 <= c <= self.channels:
+                raise _controller_error(
+                    f"Recette '{recipe.name}' : groupe '{group}', canal {c} "
+                    f"hors limites (1..{self.channels})"
+                )
+            base[c - 1] = g.current
+        self.set_channels(base)
+
+    # ------------------------------------------------------------------
+    # Persistance NVM
+    # ------------------------------------------------------------------
+    def save(self) -> None:
+        """Sauvegarde la configuration en NVM (@SV, lent : timeout 2 s)."""
+        resp = self.link.send("SV", self.address, timeout=T_SV)
+        self._require_ack(resp, "@SV")
+
+    # ------------------------------------------------------------------
+    # Lecture
+    # ------------------------------------------------------------------
+    def read_currents(self) -> list[int]:
+        """Lit les courants (mA) de chaque canal : N × @GC."""
+        out: list[int] = []
+        for ch in range(self.channels):
+            resp = self.link.send("GC", self.address, str(ch), timeout=T_DEFAULT)
+            if resp is None:
+                raise _controller_error(f"Pas de réponse @GC canal {ch} (adresse {self.address})")
+            gc = decode_gc(resp)
+            if gc is None or gc[0] != ch:
+                raise _controller_error(f"Réponse @GC illisible canal {ch} (adresse {self.address})")
+            out.append(round(step_to_ma(gc[1])))
+        self.currents = out
+        return out
+
+    def read_temperatures(self) -> tuple[float, float, float]:
+        """Températures (@GT) : (CPU, carte LED 1, carte LED 2) en °C."""
+        resp = self.link.send("GT", self.address, timeout=T_DEFAULT)
+        if resp is None:
+            raise _controller_error(f"Pas de réponse @GT à l'adresse {self.address}")
+        temps = proto.decode_temperatures(resp)
+        if temps is None:
+            raise _controller_error(f"Réponse @GT illisible à l'adresse {self.address}")
+        return temps
+
+    def read_identity(self) -> tuple[int, str]:
+        """Identité (@GI) : (numéro de série, version firmware)."""
+        resp = self.link.send("GI", self.address, timeout=T_DEFAULT)
+        if resp is None:
+            raise _controller_error(f"Pas de réponse @GI à l'adresse {self.address}")
+        ident = proto.decode_identity(resp)
+        if ident is None:
+            raise _controller_error(f"Réponse @GI illisible à l'adresse {self.address}")
+        return ident
+
+    def read_status(self) -> tuple[str, int]:
+        """Statut (@GE) : (config « OK »/« ERR », bitmask drivers)."""
+        resp = self.link.send("GE", self.address, timeout=T_DEFAULT)
+        if resp is None:
+            raise _controller_error(f"Pas de réponse @GE à l'adresse {self.address}")
+        status = decode_ge(resp)
+        if status is None:
+            raise _controller_error(f"Réponse @GE illisible à l'adresse {self.address}")
+        return status
+
+    def read_config(self) -> dict:
+        """Config (@GF + @GS) : bitmask, power, master, fréquence PWM (Hz)."""
+        resp = self.link.send("GF", self.address, timeout=T_DEFAULT)
+        if resp is None:
+            raise _controller_error(f"Pas de réponse @GF à l'adresse {self.address}")
+        bitmask = decode_gf(resp)
+        if bitmask is None:
+            raise _controller_error(f"Réponse @GF illisible à l'adresse {self.address}")
+        resp = self.link.send("GS", self.address, timeout=T_DEFAULT)
+        if resp is None:
+            raise _controller_error(f"Pas de réponse @GS à l'adresse {self.address}")
+        args = resp.args("#GS")
+        freq_hz = float(args[0]) / 10 if args else None
+        return {
+            "bitmask": bitmask,
+            "power": bool(bitmask & SF_POWER),
+            "master": bool(bitmask & SF_MASTER),
+            "freq_hz": freq_hz,
+        }
+
+    def read_led_descriptor(self, board: int = 0) -> dict:
+        """Descripteur de carte LED (@GB) : canaux, i_peek, couleurs, λ."""
+        resp = self.link.send("GB", self.address, str(board), timeout=T_DEFAULT)
+        if resp is None:
+            raise _controller_error(f"Pas de réponse @GB à l'adresse {self.address}")
+        args = resp.args("#GB")
+        if args is None or len(args) < 2:
+            raise _controller_error(f"Réponse @GB illisible à l'adresse {self.address}")
+        return decode_led_descriptor(args[1])
+
+
+# ---------------------------------------------------------------------------
+# Factories (phase 2) — le reste du programme choisit la famille ici
+# ---------------------------------------------------------------------------
+
+def make_link(family: str, tx_port: str, rx_port: str | None = None,
+              baudrate: int = BAUDRATE, trace=None) -> "PhsLink":
+    """Construit un PhsLink avec le dialect de la famille (`phs16-lc` = défaut REVD)."""
+    from .link import PhsLink
+
+    dialect = LUMIATEC if family == FAMILY_LUMIATEC else None
+    return PhsLink(tx_port, rx_port=rx_port, baudrate=baudrate, trace=trace, dialect=dialect)
+
+
+def make_luminaire(family: str, address: int, link: "PhsLink", **kwargs):
+    """Fabrique le contrôleur adapté à la famille : `phs16-lc` -> Luminaire, `lumiatec` -> LuminaireLumiatec."""
+    if family == FAMILY_LUMIATEC:
+        return LuminaireLumiatec(address=address, link=link, **kwargs)
+    from .controller import Luminaire
+
+    return Luminaire(address=address, link=link, **kwargs)
