@@ -40,15 +40,42 @@ CURRENT_MIN_MA = 74
 CURRENT_MAX_MA = 2150
 
 
+@dataclass(frozen=True)
+class Dialect:
+    """Format de trame d'une famille de luminaires.
+
+    `addr_hex` / `chk_hex` décrivent la trame PC -> SPOT ; `echo_filter` active
+    le rejet d'une trame reçue commençant par '@' (écho propre sur bus
+    half-duplex). `REVD` (PHS16-LC) est le défaut de tous les appels existants
+    et reste byte-identique ; les autres familles (ex. `lumiatec.LUMIATEC`)
+    s'activent explicitement, jamais par défaut.
+    """
+
+    name: str
+    addr_hex: bool  # True: adresse « 0x.. » en hexadécimal (PHS16-LC)
+    chk_hex: bool   # True: checksum de la requête en 2 chiffres hex (PHS16-LC)
+    echo_filter: bool = False  # True: ignorer l'écho de notre propre trame (half-duplex)
+
+
+#: Dialect PHS16-LC RevD — défaut historique, inchangé.
+REVD = Dialect(name="phs16-lc", addr_hex=True, chk_hex=True)
+
+
 def checksum(payload: bytes) -> int:
     """Somme binaire 8 bits des octets de `payload` (du '@' au caractere avant '*')."""
     return sum(payload) & 0xFF
 
 
-def build_frame(cmd: str, addr: int, params: str = "") -> bytes:
-    """Construit la trame complete, checksum et <CR> inclus."""
-    payload = b"@" + cmd.encode("ascii") + f" 0x{addr:x} ".encode("ascii") + params.encode("ascii")
-    return payload + b"*" + f"{checksum(payload):02X}".encode("ascii") + CR
+def build_frame(cmd: str, addr: int, params: str = "", dialect: Dialect | None = None) -> bytes:
+    """Construit la trame complete, checksum et <CR> inclus.
+
+    `dialect=None` vaut `REVD` (PHS16-LC) : byte-identique au format historique.
+    """
+    d = dialect if dialect is not None else REVD
+    addr_s = f"0x{addr:x}" if d.addr_hex else str(addr)
+    payload = b"@" + cmd.encode("ascii") + f" {addr_s} ".encode("ascii") + params.encode("ascii")
+    chk = f"{checksum(payload):02X}" if d.chk_hex else str(checksum(payload))
+    return payload + b"*" + chk.encode("ascii") + CR
 
 
 @dataclass(frozen=True)

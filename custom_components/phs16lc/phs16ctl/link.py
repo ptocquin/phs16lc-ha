@@ -26,7 +26,7 @@ from collections.abc import Callable
 import serial
 from serial.tools import list_ports
 
-from .protocol import CR, Response, build_frame
+from .protocol import CR, REVD, Dialect, Response, build_frame
 
 BAUDRATE = 115200
 
@@ -65,11 +65,14 @@ class PhsLink:
         rx_port: str | None = None,
         baudrate: int = BAUDRATE,
         trace: Callable[[str], None] | None = None,
+        dialect: Dialect | None = None,
     ) -> None:
         rx_port = rx_port if rx_port is not None else tx_port
         self.tx_port = tx_port
         self.rx_port = rx_port
         self.trace = trace
+        #: Format de trame ; `None` = REVD (PHS16-LC), byte-identique à l'historique.
+        self.dialect = dialect if dialect is not None else REVD
         self._tx = serial.Serial(
             port=tx_port,
             baudrate=baudrate,
@@ -120,7 +123,7 @@ class PhsLink:
         `timeout=0` correspond aux commandes qui n'attendent aucune reponse
         (@GO du bootloader) : la trame est emise et la fonction rend la main.
         """
-        frame = build_frame(cmd, addr, params)
+        frame = build_frame(cmd, addr, params, dialect=self.dialect)
         # Purge du tampon de reception avant emission : c'est le port RX qui
         # recoit (en montage a un port, c'est le meme objet que le TX).
         self._rx.reset_input_buffer()
@@ -146,6 +149,11 @@ class PhsLink:
 
         Le timeout porte sur la trame complete et non sur chaque octet, pour
         qu'une reponse partielle ne puisse pas prolonger l'attente indefiniment.
+
+        Avec `dialect.echo_filter` (bus half-duplex dont l'adaptateur renvoie
+        l'écho de notre propre trame) : une trame reçue commençant par '@' est
+        jetée et la lecture continue jusqu'à la vraie réponse. Inactif par
+        défaut (REVD) : aucun changement pour PHS16-LC.
         """
         deadline = time.monotonic() + timeout
         buffer = bytearray()
@@ -158,4 +166,7 @@ class PhsLink:
             if chunk:
                 buffer += chunk
                 if CR in buffer:
+                    if self.dialect.echo_filter and buffer.lstrip(b"\x00").startswith(b"@"):
+                        buffer = bytearray()  # écho de notre trame : on jette, on continue
+                        continue
                     return bytes(buffer)

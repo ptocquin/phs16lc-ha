@@ -34,7 +34,7 @@ SRC = ROOT.parent / "phs16ctl" / "src" / "phs16ctl"
 DST = ROOT / "custom_components" / "phs16lc" / "phs16ctl"
 COMPONENT = ROOT / "custom_components" / "phs16lc"
 
-MODULES = ["__init__.py", "protocol.py", "link.py", "controller.py", "profiles.py"]
+MODULES = ["__init__.py", "protocol.py", "link.py", "controller.py", "profiles.py", "lumiatec.py"]
 DATA_DIRS = ("recipes", "scenes")  # copiés depuis phs16ctl/<dir>/ vers phs16lc/<dir>/
 
 
