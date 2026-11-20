@@ -35,6 +35,11 @@ class FakeLumLink:
     bus: dict[int, FakeLumSpot] = {}
     fail_open: bool = False
     fail_io: bool = False
+    #: si renseigné : adresse du spot physiquement premier sur le bus — seul un
+    #: master posé sur cette adresse donne `@GE OK` (comportement fw réel,
+    #: mesuré en prod 2026-11-20 avec 131/136 -> master 136). None = tout master
+    #: unique est OK (comportement simplifié par défaut).
+    physical_first: int | None = None
 
     def __init__(
         self,
@@ -65,6 +70,7 @@ class FakeLumLink:
         cls.fail_open = False
         cls.fail_io = False
         cls.open_attempts = 0
+        cls.physical_first = None
 
     def send(self, cmd: str, addr: int, params: str = "", timeout: float = 0.0):
         if type(self).fail_io:
@@ -80,7 +86,11 @@ class FakeLumLink:
             t = spot.temps
             return proto.Response.parse(_reply(f"#GT {t[0]} {t[1]} {t[2]}"))
         if cmd == "GE":
-            config = "OK" if spot.sf & 2 else "ERR"
+            if type(self).physical_first is not None:
+                masters = [a for a, s in self.bus.items() if s.alive and s.sf & 2]
+                config = "OK" if masters == [type(self).physical_first] else "ERR"
+            else:
+                config = "OK" if spot.sf & 2 else "ERR"
             return proto.Response.parse(_reply(f"#GE {config} OxFFFF"))
         if cmd == "GF":
             return proto.Response.parse(_reply(f"#GF Ox{spot.sf:08X}"))

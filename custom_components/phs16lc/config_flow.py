@@ -16,10 +16,12 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_EXPECTED_SPOTS,
     CONF_FAMILY,
+    CONF_MASTER_ADDR,
     CONF_POLL_INTERVAL,
     CONF_RECIPES_DIR,
     CONF_RX_PORT,
     DEFAULT_FAMILY,
+    DEFAULT_MASTER_ADDR,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECIPES_DIR,
     DOMAIN,
@@ -70,9 +72,16 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
             if rx_port == port:
                 rx_port = ""  # identique au port TX => montage à un seul port
             family = str(user_input.get(CONF_FAMILY) or DEFAULT_FAMILY)
+            master_addr = int(user_input.get(CONF_MASTER_ADDR) or DEFAULT_MASTER_ADDR)
             await self.async_set_unique_id(port)
             self._abort_if_unique_id_configured()
-            data = {**user_input, CONF_PORT: port, CONF_RX_PORT: rx_port, CONF_FAMILY: family}
+            data = {
+                **user_input,
+                CONF_PORT: port,
+                CONF_RX_PORT: rx_port,
+                CONF_FAMILY: family,
+                CONF_MASTER_ADDR: master_addr,
+            }
             return self.async_create_entry(
                 title=f"{FAMILY_LABELS.get(family, family)} {port}", data=data
             )
@@ -81,6 +90,10 @@ class Phs16lcConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_FAMILY, default=DEFAULT_FAMILY): vol.In(list(FAMILIES)),
+                # lumiatec : adresse du master (0 = auto, élu par @GE OK au scan)
+                vol.Required(CONF_MASTER_ADDR, default=DEFAULT_MASTER_ADDR): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=255)
+                ),
                 vol.Required(
                     CONF_PORT,
                     default=ports[0]["value"] if ports else "/dev/ttyUSB0",
@@ -142,7 +155,12 @@ class Phs16lcOptionsFlow(OptionsFlow):
                 # _async_update_listener (après sauvegarde des options) : un
                 # second entry sur ce port restera bloqué au config flow.
             return self.async_create_entry(
-                data={**user_input, CONF_PORT: port, CONF_RX_PORT: rx_port}
+                data={
+                    **user_input,
+                    CONF_PORT: port,
+                    CONF_RX_PORT: rx_port,
+                    CONF_MASTER_ADDR: int(user_input.get(CONF_MASTER_ADDR) or DEFAULT_MASTER_ADDR),
+                }
             )
         schema = await self._build_schema(
             str(entry_value(entry, CONF_PORT)), str(entry_value(entry, CONF_RX_PORT) or "")
@@ -158,6 +176,11 @@ class Phs16lcOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_FAMILY, default=str(current.get(CONF_FAMILY, DEFAULT_FAMILY))
                 ): vol.In(list(FAMILIES)),
+                # Optional + suggested_value (pas de default=) : champ vidé/omis => 0 (auto)
+                vol.Optional(
+                    CONF_MASTER_ADDR,
+                    description={"suggested_value": int(current.get(CONF_MASTER_ADDR, 0))},
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
                 vol.Required(
                     CONF_PORT,
                     default=default_port or (ports[0]["value"] if ports else "/dev/ttyUSB0"),

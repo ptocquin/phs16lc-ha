@@ -21,5 +21,9 @@
       "description": "CH340 USB-RS485 (bus lumiatec half-duplex 2 fils)"
     }
   ],
-  "version": "1.5.1"
+<<<<<<< HEAD
+  "version": "1.5.2"
+=======
+  "version": "1.5.2"
+>>>>>>> release/1.5.2
 }

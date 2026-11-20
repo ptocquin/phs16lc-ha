@@ -20,6 +20,9 @@ CONF_RECIPES_DIR = "recipes_dir"
 # Famille de luminaires sur le bus : "phs16-lc" (défaut) ou "lumiatec"
 CONF_FAMILY = "family"
 DEFAULT_FAMILY = FAMILY_PHS16LC
+#: Adresse du master lumiatec (0 = auto : élu par @GE OK au scan)
+CONF_MASTER_ADDR = "master_addr"
+DEFAULT_MASTER_ADDR = 0
 #: Titre d'entrée par famille.
 FAMILY_LABELS = {FAMILY_PHS16LC: "PHS16-LC", FAMILY_LUMIATEC: "lumiatec"}
 
