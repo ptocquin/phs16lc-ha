@@ -64,7 +64,8 @@ class FakePhsLink:
         spot = self.bus.get(addr)
         if cmd == "GI":  # présence
             if spot is not None and spot.alive:
-                return proto.Response.parse(b"#GI V1.0.7 0x00001234*AB\r")
+                # checksum réel (sum 8 bits) : exigé par Response.is_plausible au scan
+                return proto.Response.parse(b"#GI V1.0.7 0x00001234*6F\r")
             return None
         if spot is None or not spot.alive:
             return None

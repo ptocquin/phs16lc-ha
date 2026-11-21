@@ -44,17 +44,16 @@ CURRENT_MAX_MA = 2150
 class Dialect:
     """Format de trame d'une famille de luminaires.
 
-    `addr_hex` / `chk_hex` décrivent la trame PC -> SPOT ; `echo_filter` active
-    le rejet d'une trame reçue commençant par '@' (écho propre sur bus
-    half-duplex). `REVD` (PHS16-LC) est le défaut de tous les appels existants
-    et reste byte-identique ; les autres familles (ex. `lumiatec.LUMIATEC`)
-    s'activent explicitement, jamais par défaut.
+    `addr_hex` / `chk_hex` décrivent la trame PC -> SPOT. `REVD` (PHS16-LC) est
+    le défaut de tous les appels existants et reste byte-identique ; les autres
+    familles (ex. `lumiatec.LUMIATEC`) s'activent explicitement, jamais par
+    défaut. Le rejet de l'écho (trame reçue commençant par '@') est inconditionnel
+    dans `link.PhsLink._read_frame` : une réponse ne commence jamais par '@'.
     """
 
     name: str
     addr_hex: bool  # True: adresse « 0x.. » en hexadécimal (PHS16-LC)
     chk_hex: bool   # True: checksum de la requête en 2 chiffres hex (PHS16-LC)
-    echo_filter: bool = False  # True: ignorer l'écho de notre propre trame (half-duplex)
 
 
 #: Dialect PHS16-LC RevD — défaut historique, inchangé.
@@ -64,6 +63,19 @@ REVD = Dialect(name="phs16-lc", addr_hex=True, chk_hex=True)
 def checksum(payload: bytes) -> int:
     """Somme binaire 8 bits des octets de `payload` (du '@' au caractere avant '*')."""
     return sum(payload) & 0xFF
+
+
+def checksum_ok(text: str) -> bool:
+    """Vrai si la trame `text` (sans le <CR> final) se termine par `*XX` avec
+    XX = somme binaire 8 bits des caracteres depuis le premier jusqu'au `*`
+    exclus — même règle que `checksum()` pour les requêtes, appliquée aux
+    réponses (vérifié sur trames mesurées : « #GI V1.3 0x14100088*19 »)."""
+    payload, sep, chk = text.rpartition("*")
+    if not sep or len(chk) != 2:
+        return False
+    if not all(c in "0123456789abcdefABCDEF" for c in chk):
+        return False
+    return (sum(payload.encode("ascii", errors="replace")) & 0xFF) == int(chk, 16)
 
 
 def build_frame(cmd: str, addr: int, params: str = "", dialect: Dialect | None = None) -> bytes:
@@ -105,6 +117,29 @@ class Response:
     @property
     def is_nak(self) -> bool:
         return self.tag == "NAK"
+
+    @property
+    def is_plausible(self) -> bool:
+        """Trame de réponse crédible, utilisée au scan pour ne pas compter le
+        bruit de ligne comme une carte présente.
+
+        - le tag doit être `ACK`, `NAK` ou commencer par `#` — une trame reçue
+          commençant par `@` est un écho de notre propre émission, jamais une
+          réponse ;
+        - si la trame porte un checksum `*XX`, il doit être valide
+          (`checksum_ok`) : les réponses à données (`#GI`, `#GP`, ...) en ont
+          toujours un, les `ACK`/`NAK` peuvent ne pas en avoir.
+        """
+        if not self.fields:
+            return False
+        tag = self.tag
+        if tag.startswith("@"):
+            return False
+        if tag in ("ACK", "NAK"):
+            return "*" not in self.raw or checksum_ok(self.raw)
+        if tag.startswith("#"):
+            return checksum_ok(self.raw)
+        return False
 
     @property
     def nak_code(self) -> int | None:
