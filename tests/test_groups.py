@@ -325,6 +325,32 @@ async def test_groups_change_propagates_when_devices_untouched(
 # ---------------------------------------------------------------------------
 
 
+async def test_group_light_members_attribute_lists_addresses(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """L'attribut `members` du light du groupe liste les adresses (source de vérité
+    pour la carte Lovelace, les labels registry n'étant jamais retirés)."""
+    bus = {1: FakeSpot(currents=[0] * 16), 2: FakeSpot(currents=[0] * 16)}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    light_id = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_nord_light")
+    state = hass.states.get(light_id)
+    assert state.attributes["members"] == [1, 2]
+
+    # retrait d'un membre via le service -> l'attribut suit groups.json rechargé à chaud
+    await _call(
+        hass,
+        DOMAIN,
+        "set_group",
+        {"group_id": "serre_1_nord", "addresses": "1"},
+    )
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    state = hass.states.get(light_id)
+    assert state.attributes["members"] == [1]
+
+
 async def test_group_light_turn_on_brightness_applies_to_all_members(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

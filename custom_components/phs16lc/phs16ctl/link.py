@@ -150,10 +150,11 @@ class PhsLink:
         Le timeout porte sur la trame complete et non sur chaque octet, pour
         qu'une reponse partielle ne puisse pas prolonger l'attente indefiniment.
 
-        Avec `dialect.echo_filter` (bus half-duplex dont l'adaptateur renvoie
-        l'écho de notre propre trame) : une trame reçue commençant par '@' est
-        jetée et la lecture continue jusqu'à la vraie réponse. Inactif par
-        défaut (REVD) : aucun changement pour PHS16-LC.
+        Une trame reçue commençant par '@' est l'écho de notre propre émission
+        (bus half-duplex partagé, diaphonie TX→RX sur le même câble — typique
+        d'un montage à deux convertisseurs sur 15-20 m non blindé) : elle est
+        jetée et la lecture continue jusqu'à la vraie réponse, quel que soit le
+        dialecte — une réponse ne commence jamais par '@' (tags ACK/NAK/#xx).
         """
         deadline = time.monotonic() + timeout
         buffer = bytearray()
@@ -166,7 +167,7 @@ class PhsLink:
             if chunk:
                 buffer += chunk
                 if CR in buffer:
-                    if self.dialect.echo_filter and buffer.lstrip(b"\x00").startswith(b"@"):
+                    if buffer.lstrip(b"\x00").startswith(b"@"):
                         buffer = bytearray()  # écho de notre trame : on jette, on continue
                         continue
                     return bytes(buffer)

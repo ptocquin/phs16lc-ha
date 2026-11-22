@@ -139,6 +139,42 @@
         }
       }
     },
+    "save_recipe": {
+      "name": "Enregistrer comme recette",
+      "description": "Écrit les courants actuels d'un SPOT dans un nouveau fichier recette JSON (vecteur `channels` de 16 valeurs mA) dans le dossier des recettes.",
+      "fields": {
+        "name": {
+          "name": "Nom",
+          "description": "Nom de la recette (basename du fichier .json créé)."
+        },
+        "address": {
+          "name": "Adresse",
+          "description": "Numéro de la carte (ex: \"1\") dont on enregistre les courants."
+        },
+        "description": {
+          "name": "Description",
+          "description": "Description facultative stockée dans la recette."
+        },
+        "currents": {
+          "name": "Courants (mA)",
+          "description": "Optionnel : vecteur explicite, ex. \"800,800,0,...\" (positions des sliders de la carte). Sinon : courants lus au dernier polling."
+        },
+        "overwrite": {
+          "name": "Écraser",
+          "description": "true pour écraser une recette du même nom (refus par défaut)."
+        }
+      }
+    },
+    "delete_recipe": {
+      "name": "Supprimer une recette",
+      "description": "Supprime le fichier recette <recipe>.json du dossier des recettes. Les recettes embarquées dans l'intégration sont protégées (elles reviendraient au redémarrage).",
+      "fields": {
+        "recipe": {
+          "name": "Recette",
+          "description": "Nom du fichier recette à supprimer, ex. \"ma_recette.json\"."
+        }
+      }
+    },
     "set_channels": {
       "name": "Régler les canaux",
       "description": "Règle chaque canal individuellement (16 valeurs en mA, 0 = éteint, 74-2150 mA).",

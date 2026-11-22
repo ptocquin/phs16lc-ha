@@ -229,12 +229,16 @@ def scan_line(link: PhsLink, expected: int = 0) -> list[int]:
     1..`expected` même si les premières sont muettes (ex. une seule carte
     programmée à l'adresse 2, l'adresse 1 étant vide), et retourne celles
     qui répondent.
+
+    Une adresse ne compte que si la réponse est **plausible**
+    (`Response.is_plausible` : tag ACK/NAK/#xx + checksum valide) — le bruit de
+    ligne (bus long non blindé, diaphonie) ne doit pas créer de faux SPOT.
     """
     found: list[int] = []
     address = 1
     while True:
         resp = link.send("GI", address, timeout=T_GI)
-        if resp is None:
+        if resp is None or not resp.is_plausible:
             if expected > 0:
                 # Balayage 1..expected : un silence n'arrête pas le scan,
                 # même à l'adresse 1 (carte programmée à une adresse > 1).

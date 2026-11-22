@@ -15,6 +15,7 @@ retirés quand la dernière entrée est déchargée.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -32,6 +33,8 @@ SERVICES = (
     "apply_recipe",
     "apply_scene",
     "save",
+    "save_recipe",
+    "delete_recipe",
     "set_channels",
     "set_channel",
     "set_group",
@@ -360,11 +363,101 @@ async def _handle_remove_group(call: ServiceCall) -> None:
     await coordinator.async_reload_groups_now()
 
 
+async def _handle_save_recipe(call: ServiceCall) -> None:
+    """Enregistre les courants d'un SPOT comme une nouvelle recette (JSON v1 `channels`).
+
+    `currents` optionnel : vecteur explicite (ex. positions des sliders de la carte
+    Lovelace, qui peuvent ne pas encore être reflétées par le polling) ; sinon les
+    courants lus au dernier polling du SPOT sont utilisés. Refuse d'écraser une
+    recette existante sauf `overwrite: true`.
+    """
+    raw_name = str(call.data["name"]).strip()
+    if raw_name.endswith(".json"):
+        raw_name = raw_name[: -len(".json")]
+    name = _safe_filename(raw_name)
+    if not name:
+        raise ServiceValidationError("name vide")
+    description = str(call.data.get("description") or "").strip()
+    overwrite = bool(call.data.get("overwrite", False))
+    currents_raw = call.data.get("currents")
+    for coordinator in _coordinators(call.hass):
+        if (
+            _group_target(call.data["address"]) is not None
+            or str(call.data["address"]).strip().lower() == "all"
+        ):
+            raise ServiceValidationError("save_recipe cible l'adresse d'un seul SPOT")
+        for address in _addresses(call.data["address"], coordinator):
+            spot = coordinator.data.spots[address]
+            if currents_raw is not None:
+                currents = _parse_currents(currents_raw)
+                if spot.currents and len(currents) != len(spot.currents):
+                    raise ServiceValidationError(
+                        f"SPOT {address} a {len(spot.currents)} canaux, "
+                        f"{len(currents)} valeurs fournies"
+                    )
+            else:
+                if not spot.online or not spot.currents:
+                    raise ServiceValidationError(
+                        f"SPOT {address} hors ligne ou courants inconnus "
+                        "— attente du prochain polling"
+                    )
+                currents = list(spot.currents)
+            path = recipes_dir_for_entry(coordinator.entry) / f"{name}.json"
+
+            def _do(path=path, name=name, description=description, currents=currents) -> None:
+                if path.exists() and not overwrite:
+                    raise ServiceValidationError(
+                        f"la recette {name!r} existe déjà (overwrite=true pour écraser)"
+                    )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "name": name,
+                    "description": description,
+                    "channels": [int(v) for v in currents],
+                }
+                tmp = path.with_name(path.name + ".tmp")
+                tmp.write_text(
+                    json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+                )
+                tmp.replace(path)
+
+            await coordinator.async_io(_do)
+
+
+async def _handle_delete_recipe(call: ServiceCall) -> None:
+    """Supprime un fichier recette `<recipes_dir>/<recipe>.json`.
+
+    Refuse de supprimer une recette embarquée (présente dans le dossier `recipes/`
+    du composant) : elle serait de toute façon recopiée au prochain démarrage.
+    """
+    raw_name = str(call.data["recipe"]).strip()
+    if raw_name.endswith(".json"):
+        raw_name = raw_name[: -len(".json")]
+    name = _safe_filename(raw_name)
+    embedded = Path(__file__).parent / "recipes" / f"{name}.json"
+    for coordinator in _coordinators(call.hass):
+        path = recipes_dir_for_entry(coordinator.entry) / f"{name}.json"
+
+        def _do(path=path, embedded=embedded) -> None:
+            if embedded.exists():
+                raise ServiceValidationError(
+                    f"recette {name!r} embarquée dans l'intégration : non supprimable "
+                    "(elle reviendrait au prochain redémarrage)"
+                )
+            if not path.exists():
+                raise ServiceValidationError(f"recette {name!r} introuvable")
+            path.unlink()
+
+        await coordinator.async_io(_do)
+
+
 _HANDLERS = {
     "scan": _handle_scan,
     "apply_recipe": _handle_apply_recipe,
     "apply_scene": _handle_apply_scene,
     "save": _handle_save,
+    "save_recipe": _handle_save_recipe,
+    "delete_recipe": _handle_delete_recipe,
     "set_channels": _handle_set_channels,
     "set_channel": _handle_set_channel,
     "set_group": _handle_set_group,

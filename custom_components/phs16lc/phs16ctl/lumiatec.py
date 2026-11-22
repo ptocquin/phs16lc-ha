@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from .link import PhsLink
 
 #: Dialect lumiatec : adresse décimale, checksum requête décimal, filtre d'écho.
-LUMIATEC = Dialect(name="lumiatec", addr_hex=False, chk_hex=False, echo_filter=True)
+LUMIATEC = Dialect(name="lumiatec", addr_hex=False, chk_hex=False)
 
 BAUDRATE = 115200
 
@@ -218,11 +218,15 @@ def scan_line(link: "PhsLink", expected: int = 0, max_addr: int = 255,
     Les adresses lumiatec ne sont **pas contiguës** (ex. 131, 136) : pas
     d'arrêt au premier silence. `expected > 0` balaie 1..expected ; sinon
     1..max_addr (défaut 255).
+
+    Comme pour PHS16-LC, une adresse ne compte que si la réponse est plausible
+    (`Response.is_plausible`) : le bruit de ligne ne crée pas de faux spots.
     """
     found: list[int] = []
     top = expected if expected > 0 else max_addr
     for address in range(1, top + 1):
-        if link.send("GI", address, timeout=timeout) is not None:
+        resp = link.send("GI", address, timeout=timeout)
+        if resp is not None and resp.is_plausible:
             found.append(address)
     return found
 

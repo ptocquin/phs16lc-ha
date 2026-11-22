@@ -43,6 +43,37 @@ save:
       selector:
         text:
 
+save_recipe:
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+    address:
+      required: true
+      selector:
+        text:
+    description:
+      required: false
+      selector:
+        text:
+    currents:
+      required: false
+      selector:
+        text:
+    overwrite:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+delete_recipe:
+  fields:
+    recipe:
+      required: true
+      selector:
+        text:
+
 set_channels:
   fields:
     address:

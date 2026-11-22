@@ -86,7 +86,10 @@ class Phs16Data:
 def _poll_spots(link: PhsLink, spots: dict[int, SpotState], family: str = DEFAULT_FAMILY) -> None:
     """Batch de polling, exécuté en un seul job executor (un seul thread sur le port)."""
     for spot in spots.values():
-        spot.online = link.send("GI", spot.address, timeout=T_GI) is not None
+        resp = link.send("GI", spot.address, timeout=T_GI)
+        # réponse plausible exigée : le bruit de ligne ne doit pas marquer un
+        # SPOT « online » (même règle que le scan, Response.is_plausible)
+        spot.online = resp is not None and resp.is_plausible
         if not spot.online:
             spot.currents = None
             spot.temperatures = None
