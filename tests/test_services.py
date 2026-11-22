@@ -61,6 +61,7 @@ async def test_services_registered_on_setup(hass, monkeypatch, tmp_path) -> None
         "apply_recipe",
         "apply_scene",
         "save",
+        "save_recipe",
         "set_channels",
         "set_channel",
         "set_group",
@@ -120,6 +121,63 @@ async def test_save_service(hass, monkeypatch, tmp_path) -> None:
 
     assert ("WP", 1, "") in FakePhsLink.instances[0].sent
     assert events[-1] == {"address": 1, "ok": True}
+
+
+async def test_save_recipe_service_writes_v1_file(hass, monkeypatch, tmp_path) -> None:
+    bus = {1: FakeSpot(currents=[500] * 8 + [0] * 8)}
+    _entry, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    # courants lus au dernier polling (pas de champ currents)
+    await _call(hass, "save_recipe", {"address": "1", "name": "ma_recette"})
+    path = tmp_path / "recipes" / "ma_recette.json"
+    assert path.exists()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["name"] == "ma_recette"
+    assert payload["channels"] == [500] * 8 + [0] * 8
+
+    # refus d'écraser sans overwrite, puis OK avec overwrite + suffixe .json accepté
+    currents = ",".join(str(v) for v in [800] * 16)
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, "save_recipe", {"address": "1", "name": "ma_recette"})
+    await _call(
+        hass,
+        "save_recipe",
+        {"address": "1", "name": "ma_recette.json", "currents": currents, "overwrite": True},
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["channels"] == [800] * 16
+
+
+async def test_save_recipe_explicit_currents_and_overwrite(hass, monkeypatch, tmp_path) -> None:
+    bus = {1: FakeSpot(currents=[500] * 16)}
+    await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
+
+    # vecteur explicite (positions des sliders de la carte)
+    currents = ",".join(str(v) for v in [900] * 16)
+    await _call(hass, "save_recipe", {"address": "1", "name": "sliders", "currents": currents})
+    payload = json.loads((tmp_path / "recipes" / "sliders.json").read_text(encoding="utf-8"))
+    assert payload["channels"] == [900] * 16
+
+    # même nom sans overwrite -> refus ; avec overwrite -> OK
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, "save_recipe", {"address": "1", "name": "sliders", "currents": currents})
+    await _call(
+        hass,
+        "save_recipe",
+        {"address": "1", "name": "sliders", "currents": "0," * 15 + "0", "overwrite": True},
+    )
+    payload = json.loads((tmp_path / "recipes" / "sliders.json").read_text(encoding="utf-8"))
+    assert payload["channels"] == [0] * 16
+
+    # mauvais compte de valeurs -> refus
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, "save_recipe", {"address": "1", "name": "bad", "currents": "800,0"})
+
+    # groupe / all -> refus (un seul SPOT)
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, "save_recipe", {"address": "all", "name": "x"})
 
 
 async def test_set_channels_service_string_and_count_check(hass, monkeypatch, tmp_path) -> None:

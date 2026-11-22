@@ -137,6 +137,32 @@
         }
       }
     },
+    "save_recipe": {
+      "name": "Save as recipe",
+      "description": "Writes the current currents of a SPOT into a new recipe JSON file (`channels` vector of 16 mA values) in the recipes folder.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Recipe name (basename of the .json file created)."
+        },
+        "address": {
+          "name": "Address",
+          "description": "Card number (e.g. \"1\") whose currents are saved."
+        },
+        "description": {
+          "name": "Description",
+          "description": "Optional description stored in the recipe."
+        },
+        "currents": {
+          "name": "Currents (mA)",
+          "description": "Optional: explicit vector, e.g. \"800,800,0,...\" (card slider positions). Otherwise: currents read at the last poll."
+        },
+        "overwrite": {
+          "name": "Overwrite",
+          "description": "true to overwrite an existing recipe of the same name (refuses by default)."
+        }
+      }
+    },
     "set_channels": {
       "name": "Set channels",
       "description": "Sets each channel individually (16 values in mA, 0 = off, 74-2150 mA).",
