@@ -163,6 +163,16 @@
         }
       }
     },
+    "delete_recipe": {
+      "name": "Delete recipe",
+      "description": "Deletes the <recipe>.json recipe file from the recipes folder. Recipes bundled with the integration are protected (they would come back on restart).",
+      "fields": {
+        "recipe": {
+          "name": "Recipe",
+          "description": "Name of the recipe file to delete, e.g. \"my_recipe.json\"."
+        }
+      }
+    },
     "set_channels": {
       "name": "Set channels",
       "description": "Sets each channel individually (16 values in mA, 0 = off, 74-2150 mA).",

@@ -34,6 +34,7 @@ SERVICES = (
     "apply_scene",
     "save",
     "save_recipe",
+    "delete_recipe",
     "set_channels",
     "set_channel",
     "set_group",
@@ -423,12 +424,40 @@ async def _handle_save_recipe(call: ServiceCall) -> None:
             await coordinator.async_io(_do)
 
 
+async def _handle_delete_recipe(call: ServiceCall) -> None:
+    """Supprime un fichier recette `<recipes_dir>/<recipe>.json`.
+
+    Refuse de supprimer une recette embarquée (présente dans le dossier `recipes/`
+    du composant) : elle serait de toute façon recopiée au prochain démarrage.
+    """
+    raw_name = str(call.data["recipe"]).strip()
+    if raw_name.endswith(".json"):
+        raw_name = raw_name[: -len(".json")]
+    name = _safe_filename(raw_name)
+    embedded = Path(__file__).parent / "recipes" / f"{name}.json"
+    for coordinator in _coordinators(call.hass):
+        path = recipes_dir_for_entry(coordinator.entry) / f"{name}.json"
+
+        def _do(path=path, embedded=embedded) -> None:
+            if embedded.exists():
+                raise ServiceValidationError(
+                    f"recette {name!r} embarquée dans l'intégration : non supprimable "
+                    "(elle reviendrait au prochain redémarrage)"
+                )
+            if not path.exists():
+                raise ServiceValidationError(f"recette {name!r} introuvable")
+            path.unlink()
+
+        await coordinator.async_io(_do)
+
+
 _HANDLERS = {
     "scan": _handle_scan,
     "apply_recipe": _handle_apply_recipe,
     "apply_scene": _handle_apply_scene,
     "save": _handle_save,
     "save_recipe": _handle_save_recipe,
+    "delete_recipe": _handle_delete_recipe,
     "set_channels": _handle_set_channels,
     "set_channel": _handle_set_channel,
     "set_group": _handle_set_group,

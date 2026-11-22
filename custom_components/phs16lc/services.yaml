@@ -67,6 +67,13 @@ save_recipe:
       selector:
         boolean:
 
+delete_recipe:
+  fields:
+    recipe:
+      required: true
+      selector:
+        text:
+
 set_channels:
   fields:
     address:

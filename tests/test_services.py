@@ -62,6 +62,7 @@ async def test_services_registered_on_setup(hass, monkeypatch, tmp_path) -> None
         "apply_scene",
         "save",
         "save_recipe",
+        "delete_recipe",
         "set_channels",
         "set_channel",
         "set_group",
@@ -178,6 +179,25 @@ async def test_save_recipe_explicit_currents_and_overwrite(hass, monkeypatch, tm
     # groupe / all -> refus (un seul SPOT)
     with pytest.raises(HomeAssistantError):
         await _call(hass, "save_recipe", {"address": "all", "name": "x"})
+
+
+async def test_delete_recipe_service(hass, monkeypatch, tmp_path) -> None:
+    bus = {1: FakeSpot(currents=[500] * 16)}
+    await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
+    recipes = tmp_path / "recipes"
+
+    # recette créée via save_recipe -> supprimable
+    await _call(hass, "save_recipe", {"address": "1", "name": "ma_recette"})
+    assert (recipes / "ma_recette.json").exists()
+    await _call(hass, "delete_recipe", {"recipe": "ma_recette.json"})
+    assert not (recipes / "ma_recette.json").exists()
+
+    # inconnue -> refus ; embarquée (croissance.json existe dans le composant) -> refus
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, "delete_recipe", {"recipe": "inconnue.json"})
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, "delete_recipe", {"recipe": "croissance.json"})
+    assert (recipes / "croissance.json").exists()  # la copie du dossier de test intacte
 
 
 async def test_set_channels_service_string_and_count_check(hass, monkeypatch, tmp_path) -> None:

@@ -163,6 +163,16 @@
         }
       }
     },
+    "delete_recipe": {
+      "name": "Supprimer une recette",
+      "description": "Supprime le fichier recette <recipe>.json du dossier des recettes. Les recettes embarquées dans l'intégration sont protégées (elles reviendraient au redémarrage).",
+      "fields": {
+        "recipe": {
+          "name": "Recette",
+          "description": "Nom du fichier recette à supprimer, ex. \"ma_recette.json\"."
+        }
+      }
+    },
     "set_channels": {
       "name": "Régler les canaux",
       "description": "Règle chaque canal individuellement (16 valeurs en mA, 0 = éteint, 74-2150 mA).",
