@@ -169,6 +169,16 @@ class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
             return None
         return ma_to_brightness(max(max(s.currents) for s in spots), self.coordinator.family)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """`members` : adresses des SPOT du groupe, lues dans groups.json (source de
+        vérité). Utilisé par la carte Lovelace du groupe — les labels du device
+        registry ne sont jamais retirés par la synchro (voir groups.py), donc un
+        membre retiré resterait visible via les labels."""
+        if self._group_id not in self.coordinator.groups:
+            return {}
+        return {"members": sorted(self.coordinator.group_addresses(self._group_id))}
+
     async def _run_group(self, coro) -> None:
         try:
             results = await coro
