@@ -304,6 +304,12 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] Tests : `tests/test_reconnect.py` (4 tests : perte au seuil + entités unavailable + événement, reconnexion + rescan + `last_recipe` conservé, rate-limit des tentatives, commande avec lien mort → `HomeAssistantError`) ; `tests/test_options.py` (+4 tests : form pré-rempli port/rx_port, changement de port → reload sur le nouveau port + unique_id/titre + ancien port fermé, normalisation rx_port, montage dual, conflit → erreur) ; `fake_bus.py` : flags `fail_open`/`fail_io`/`open_attempts`
 - [x] Traductions fr/en + `strings.json` (options : `port`, `rx_port`, erreur `already_configured`) ; GUIDE v0.47 (§5.4 changer de port via les options, §7 reconnexion auto)
 
+### Phase 12 — Services recette depuis l'UI + attribut `members` du groupe — FAITE (2026-11-22, v1.5.3, 134 tests OK)
+- [x] **`phs16lc.save_recipe`** (`services.py`) : écrit `<recipes_dir>/<name>.json` au format v1 (`channels` = 16 mA) ; `currents` optionnel (positions des sliders de la carte Lovelace, pas encore reflétées par le polling), sinon courants du dernier poll ; refuse d'écraser sauf `overwrite: true` ; refuse `all`/`group:` ; `services.yaml` + traductions fr/en ; tests : écriture v1, refus overwrite, vecteur explicite, mauvais compte, `all` refusé
+- [x] **`phs16lc.delete_recipe`** : supprime `<recipes_dir>/<recipe>.json` (suffixe `.json` accepté) ; refuse les recettes embarquées du composant (recopiées au boot) et les noms inconnus ; tests : OK / inconnue / embarquée refusées
+- [x] **Attribut `members`** sur le `light` du groupe (`light.py` `GroupLight.extra_state_attributes`) : adresses lues dans `groups.json`, suivies à chaud — source de vérité pour la carte Lovelace (les labels registry ne sont jamais retirés par `sync_group_registries`) ; test : attribut exposé + suit `set_group`
+- [x] Utilisé par la **carte Lovelace** `ha-card/` (projet séparé, release v1.0.0) : enregistrer/supprimer une recette, ajouter/retirer des membres d'un groupe depuis l'UI
+
 ## 7. Stratégie de test
 
 Tout se déroule sur le MacBook Pro (boucle de développement §3.1).
