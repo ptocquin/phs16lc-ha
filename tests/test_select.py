@@ -11,7 +11,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.phs16lc.const import DOMAIN, EVENT_RECIPE_APPLIED
+from custom_components.phs16lc.const import (
+    DEFAULT_LED_MAX_MA,
+    DOMAIN,
+    EVENT_RECIPE_APPLIED,
+    clamp_led_vector,
+)
 
 from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
@@ -91,7 +96,10 @@ async def test_group_select_applies_partial_group(hass, monkeypatch, tmp_path) -
     gid = _select_id(hass, entry, 1, "group")
 
     await _select(hass, rid, "spectre.json")  # bleu 1-8 à 1000, rouge 9-16 à 1200
-    assert coord.data.spots[1].currents == [1000] * 8 + [1200] * 8
+    # D24 : 1200 mA dépasse le max des canaux FR 9 et 15 (1000 mA) -> clampés par le lien
+    expected = clamp_led_vector([1000] * 8 + [1200] * 8, DEFAULT_LED_MAX_MA)[0]
+    assert coord.data.spots[1].currents == expected
+    assert coord.data.spots[1].currents[8] == 1000 and coord.data.spots[1].currents[14] == 1000
 
     # options du select Groupe = groupes de la recette courante
     assert hass.states.get(gid).attributes["options"] == ["bleu", "rouge"]
