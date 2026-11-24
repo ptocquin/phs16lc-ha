@@ -9,6 +9,9 @@
 scan:
   fields: {}
 
+provision:
+  fields: {}
+
 apply_recipe:
   fields:
     address:

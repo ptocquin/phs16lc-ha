@@ -60,8 +60,8 @@ async def async_setup_entry(
         lambda group_id: GroupSaveButton(coordinator, entry, group_id),
     )
 
-    # Boutons hub : scan + un bouton par fichier de scène
-    async_add_entities([ScanButton(coordinator, entry)])
+    # Boutons hub : scan + re-provisionnement + un bouton par fichier de scène
+    async_add_entities([ScanButton(coordinator, entry), ProvisionButton(coordinator, entry)])
     known_scenes: set[str] = set()
 
     async def _async_add_scene_buttons() -> None:
@@ -108,6 +108,25 @@ class ScanButton(HubButton):
     async def async_press(self) -> None:
         # le coordinator tire l'événement phs16lc_scan
         await self.coordinator.async_rescan()
+
+
+class ProvisionButton(HubButton):
+    """Re-provisionnement manuel de la ligne (@UNP + @DI/@PRG, README §5.2).
+
+    Action d'installation délibérément manuelle : réinitialise TOUTES les
+    adresses du bus puis les réalloue 1..N par proximité au PC. Ne JAMAIS
+    déclenché par le polling.
+    """
+
+    def __init__(self, coordinator: Phs16Coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, entity_key="provision", translation_key="provision")
+
+    async def async_press(self) -> None:
+        try:
+            # le coordinator tire l'événement phs16lc_provisioned puis rescanne
+            await self.coordinator.async_provision_line()
+        except (LuminaireError, OSError) as exc:
+            raise HomeAssistantError(f"Re-provisionnement de la ligne : {exc}") from exc
 
 
 class SceneButton(HubButton):

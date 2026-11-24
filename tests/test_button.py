@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er
 
 from custom_components.phs16lc.const import (
     DOMAIN,
+    EVENT_PROVISIONED,
     EVENT_SAVED,
     EVENT_SCANNED,
     EVENT_SCENE_APPLIED,
@@ -141,3 +142,43 @@ async def test_scan_button_discovers_new_spot(hass, monkeypatch, tmp_path) -> No
     assert set(coord.data.spots) == {1, 2}
     assert len(hass.states.async_all("binary_sensor")) == 2
     assert events[-1] == {"addresses": [1, 2], "count": 2}
+
+
+async def test_provision_button_reprograms_line(hass, monkeypatch, tmp_path) -> None:
+    """Bouton « Reprogrammer la ligne » : @UNP puis @DI/@PRG réallouent 1..N."""
+    bus = {1: FakeSpot(serial=0xAAAA), 2: FakeSpot(serial=0xBBBB)}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=4)
+    # deux luminaires neufs, non programmés (adresse usine), en bout de ligne
+    bus[3] = FakeSpot(serial=0xCCCC, programmed=False)
+    bus[4] = FakeSpot(serial=0xDDDD, programmed=False)
+    events: list[dict] = []
+    hass.bus.async_listen(EVENT_PROVISIONED, lambda e: events.append(e.data))
+
+    await _press(hass, _button_id(hass, entry, "provision"))
+
+    link = FakePhsLink.instances[0]
+    assert ("UNP", 0, "") in link.sent
+    prg = [s for s in link.sent if s[0] == "PRG"]
+    assert len(prg) == 4  # les 4 SPOT ré-alloués 1..4 par proximité au PC
+    assert set(coord.data.spots) == {1, 2, 3, 4}
+    assert len(hass.states.async_all("binary_sensor")) == 4
+    assert events[-1]["count"] == 4
+    assert {s["serial"] for s in events[-1]["spots"]} == {
+        "0x0000aaaa",
+        "0x0000bbbb",
+        "0x0000cccc",
+        "0x0000dddd",
+    }
+
+
+async def test_provision_button_rejected_on_lumiatec(hass, monkeypatch, tmp_path) -> None:
+    """@UNP/@PRG n'existe qu'en phs16-lc : le bouton doit refuser en lumiatec."""
+    bus = {1: FakeSpot()}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    coord.family = "lumiatec"
+
+    with pytest.raises(HomeAssistantError):
+        await _press(hass, _button_id(hass, entry, "provision"))
+
+    link = FakePhsLink.instances[0]
+    assert not any(c == "UNP" for c, _, _ in link.sent)

@@ -72,6 +72,9 @@
       },
       "scan": {
         "name": "Scanner la ligne"
+      },
+      "provision": {
+        "name": "Reprogrammer la ligne"
       }
     },
     "sensor": {
@@ -96,6 +99,10 @@
     "scan": {
       "name": "Scanner la ligne",
       "description": "Recherche les cartes PHS16-LC présentes sur le bus (adresses 1..N)."
+    },
+    "provision": {
+      "name": "Reprogrammer la ligne",
+      "description": "Réinitialise toutes les adresses du bus (@UNP) puis les réalloue 1..N par proximité au PC (@DI/@PRG). Réservé à l'installation ou à l'ajout manuel d'un luminaire — ne jamais lancer automatiquement."
     },
     "apply_recipe": {
       "name": "Appliquer une recette",

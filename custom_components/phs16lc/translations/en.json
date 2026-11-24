@@ -70,6 +70,9 @@
       },
       "scan": {
         "name": "Scan the line"
+      },
+      "provision": {
+        "name": "Reprogram the line"
       }
     },
     "sensor": {
@@ -94,6 +97,10 @@
     "scan": {
       "name": "Scan the line",
       "description": "Searches for PHS16-LC cards present on the bus (addresses 1..N)."
+    },
+    "provision": {
+      "name": "Reprogram the line",
+      "description": "Resets all bus addresses (@UNP) then reallocates them 1..N by proximity to the PC (@DI/@PRG). Reserved for installation or manually adding a luminaire — never run automatically."
     },
     "apply_recipe": {
       "name": "Apply a recipe",

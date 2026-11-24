@@ -4,6 +4,10 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.51 — 2026-11-24 — §6.9 : **bouton « Reprogrammer la ligne » + service
+> `phs16lc.provision`** — re-provisionnement manuel de la ligne (`@UNP` +
+> `@DI`/`@PRG`, adresses 1..N par proximité) pour installer/ajouter un luminaire
+> neuf, qui sort d'usine avec l'adresse 1 (conflit avec une ligne déjà adressée).
 > Version : 0.49 — 2026-11-19 — §6.8 : **création/modification des groupes depuis
 > l'UI** — services `phs16lc.set_group` / `phs16lc.remove_group` (sélecteur
 > multi-luminaires `spots`, `addresses`, `area`, icône, couleur, renommage) :
@@ -1137,6 +1141,7 @@ le **VPN existant** : aucun port à ouvrir, aucun service cloud requis.
 | Bouton « Sauvegarder NVM » | Rend les courants actuels **permanents** dans la carte (`@WP`). Sans ça, ils sont perdus à la mise hors tension. |
 | Boutons « Scène … » | Appliquent un fichier de scène à plusieurs cartes d'un coup. |
 | Bouton « Scanner la ligne » | Redécouvre les cartes présentes. |
+| Bouton « Reprogrammer la ligne » | Re-provisionnement **manuel** de la ligne : `@UNP` (reset de toutes les adresses) puis `@DI`/`@PRG` réallouant 1..N par proximité au PC. Voir §6.9. |
 | Capteurs « Température CPU / LED 1 / LED 2 » | °C, enregistrés dans l'historique. |
 | Capteur « Courants » | Résumé (ex: « 800 mA × 8 + 0 × 8 ») + détail canal par canal en attributs. |
 | Capteur « En ligne » | Présence de la carte sur le bus. |
@@ -1227,7 +1232,8 @@ action:
 ### 6.6 Services avancés
 
 Disponibles dans Outils de développement → Services :
-`phs16lc.scan`, `phs16lc.apply_recipe`, `phs16lc.apply_scene`, `phs16lc.save`,
+`phs16lc.scan`, `phs16lc.provision` (§6.9), `phs16lc.apply_recipe`,
+`phs16lc.apply_scene`, `phs16lc.save`,
 `phs16lc.set_channels` (16 valeurs mA), `phs16lc.set_channel` (un canal).
 
 ### 6.7 Coexistence avec la CLI `phs16ctl`
@@ -1363,6 +1369,31 @@ créées à chaud.
   entities avec le select « Recette » du groupe, le bouton « Sauvegarder NVM »
   et les toggles de chaque SPOT membre. Sur le plan (picture-elements), un
   clic sur un SPOT = toggle, appui long = more-info.
+
+### 6.9 Ajouter un luminaire neuf — « Reprogrammer la ligne »
+
+**Constaté en production (2026-11-24)** : un luminaire PHS16-LC neuf sort
+d'usine **programmé à l'adresse 1**. Branché tel quel derrière une ligne déjà
+adressée, il entre en conflit d'adresse (réponses en collision sur la paire RX)
+et reste invisible du scan `@GI` — symptôme : « en tête de ligne il répond,
+derrière il est muet ».
+
+Procédure d'ajout (manuelle, délibérée) :
+
+1. Brancher le nouveau luminaire en bout de ligne, secteur allumé ;
+2. Bouton hub **« Reprogrammer la ligne »** (ou service `phs16lc.provision`) :
+   émet `@UNP` en broadcast (reset de **toutes** les adresses du bus) puis
+   boucle `@DI` / `@PRG` qui réalloue les adresses **1..N par proximité au PC**
+   (le plus proche du PC reçoit 1) ; événement `phs16lc_provisioned` + rescan
+   automatique (les entités des cartes apparaissent aussitôt) ;
+3. Régler les courants, puis **« Sauvegarder NVM »** (`@WP`) — `@SP` est volatil.
+
+> Ce bouton/service n'est **jamais** déclenché par le polling : un SPOT qui perd
+> son adresse ne doit pas provoquer de reprogrammation automatique de la ligne
+> (règle du projet). Équivalent CLI : `phs16ctl --port … provision`
+> (phs16-lc uniquement ; en lumiatec les adresses sont fixes, scan `@GS`).
+> Côté CLI, ne jamais lancer `phs16ctl` sur le même port que l'intégration HA
+> active (§6.7).
 
 ---
 

@@ -7,6 +7,12 @@ from dataclasses import dataclass, field
 from custom_components.phs16lc.phs16ctl import protocol as proto
 
 
+def _frame(body: str) -> bytes:
+    """Trame de réponse réaliste : « body*XX<CR> » avec XX = checksum 8 bits."""
+    payload = body.encode()
+    return payload + b"*" + f"{sum(payload) & 0xFF:02X}".encode() + b"\r"
+
+
 @dataclass
 class FakeSpot:
     """Une carte simulée."""
@@ -14,6 +20,8 @@ class FakeSpot:
     alive: bool = True
     currents: list[int] = field(default_factory=lambda: [0] * 16)
     temps: tuple[float, float, float] = (30.0, 31.0, 32.0)
+    serial: int = 0x1234  # n° de série (provisionnement @DI/@PRG)
+    programmed: bool = True  # False = SPOT neuf "non programmé" (adresse usine)
 
 
 class FakePhsLink:
@@ -62,12 +70,39 @@ class FakePhsLink:
             raise OSError(19, "Device not configured")
         self.sent.append((cmd, addr, params))
         spot = self.bus.get(addr)
-        if cmd == "GI":  # présence
-            if spot is not None and spot.alive:
-                # checksum réel (sum 8 bits) : exigé par Response.is_plausible au scan
-                return proto.Response.parse(b"#GI V1.0.7 0x00001234*6F\r")
+        if cmd == "GU":  # au moins un SPOT non programmé -> ACK
+            if any(s.alive and not s.programmed for s in self.bus.values()):
+                return proto.Response.parse(b"ACK*00\r")
             return None
-        if spot is None or not spot.alive:
+        if cmd == "UNP":  # broadcast : tous les SPOT repassent non programmés, silence = OK
+            for s in self.bus.values():
+                if s.alive:
+                    s.programmed = False
+            return None
+        if cmd == "DI":  # premier SPOT non programmé (ordre d'adresse = proximité au PC)
+            for a in sorted(self.bus):
+                s = self.bus[a]
+                if s.alive and not s.programmed:
+                    return proto.Response.parse(_frame(f"#DI V1.0.7 0x{s.serial:08x}"))
+            return None
+        if cmd == "PRG":  # params "0x<SN> <adresse>" : alloue l'adresse à ce SN
+            parts = params.split()
+            sn = int(parts[0], 16)
+            new_addr = int(parts[1])
+            for a in sorted(self.bus):
+                s = self.bus[a]
+                if s.alive and not s.programmed and s.serial == sn:
+                    del self.bus[a]
+                    s.programmed = True
+                    self.bus[new_addr] = s
+                    return proto.Response.parse(b"ACK*00\r")
+            return None  # SN invalide
+        if cmd == "GI":  # présence (seulement si programmé)
+            if spot is not None and spot.alive and spot.programmed:
+                # checksum réel (sum 8 bits) : exigé par Response.is_plausible au scan
+                return proto.Response.parse(_frame(f"#GI V1.0.7 0x{spot.serial:08x}"))
+            return None
+        if spot is None or not spot.alive or not spot.programmed:
             return None
         if cmd == "GP":
             vals = " ".join(str(c) for c in spot.currents)

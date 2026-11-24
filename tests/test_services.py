@@ -9,7 +9,12 @@ from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.phs16lc.const import DOMAIN, EVENT_RECIPE_APPLIED, EVENT_SAVED
+from custom_components.phs16lc.const import (
+    DOMAIN,
+    EVENT_PROVISIONED,
+    EVENT_RECIPE_APPLIED,
+    EVENT_SAVED,
+)
 
 from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
@@ -58,6 +63,7 @@ async def test_services_registered_on_setup(hass, monkeypatch, tmp_path) -> None
     await _setup(hass, monkeypatch, {1: FakeSpot()}, tmp_path, expected=1)
     for service in (
         "scan",
+        "provision",
         "apply_recipe",
         "apply_scene",
         "save",
@@ -249,3 +255,25 @@ async def test_services_removed_on_last_unload(hass, monkeypatch, tmp_path) -> N
     await hass.async_block_till_done()
 
     assert not hass.services.has_service(DOMAIN, "scan")
+
+
+async def test_provision_service_reprograms_line(hass, monkeypatch, tmp_path) -> None:
+    """phs16lc.provision : @UNP broadcast puis @DI/@PRG réallouent 1..N par proximité."""
+    bus = {1: FakeSpot(serial=0xAAAA)}
+    _, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=2)
+    # un luminaire neuf, non programmé (adresse usine), branché en bout de ligne
+    bus[2] = FakeSpot(serial=0xBBBB, programmed=False)
+    events: list[dict] = []
+    hass.bus.async_listen(EVENT_PROVISIONED, lambda e: events.append(e.data))
+
+    await _call(hass, "provision", {})
+
+    link = FakePhsLink.instances[0]
+    assert ("UNP", 0, "") in link.sent
+    prg = [s for s in link.sent if s[0] == "PRG"]
+    assert len(prg) == 2
+    assert ("PRG", 0, "0xaaaa 1") in link.sent
+    assert ("PRG", 0, "0xbbbb 2") in link.sent
+    assert set(coord.data.spots) == {1, 2}
+    assert events[-1]["count"] == 2
+    assert {s["serial"] for s in events[-1]["spots"]} == {"0x0000aaaa", "0x0000bbbb"}
