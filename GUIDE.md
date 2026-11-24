@@ -4,6 +4,15 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.53 — 2026-11-24 — §6.2/§10 : **variateur de recette (D23) + clamp LED
+> systématique (D24)** — le slider dimme la dernière recette canal par canal (jamais
+> de courant uniforme) et tout courant envoyé est clampé aux max LED du §10
+> (surcharge `<config>/phs16lc/led_max.json`) ; sans recette choisie, le slider est
+> inactif (erreur explicite).
+> Version : 0.52 — 2026-11-24 — §10 : **spécifications des canaux LED du PHS16-LC**
+> (type RE/WH/FR/BL, courant max par canal, proposition « test pleine charge ») —
+> ne jamais dépasser le max LED (FR 1000 mA, RE 1400 mA) malgré les 2150 mA
+> acceptés par le driver.
 > Version : 0.51 — 2026-11-24 — §6.9 : **bouton « Reprogrammer la ligne » + service
 > `phs16lc.provision`** — re-provisionnement manuel de la ligne (`@UNP` +
 > `@DI`/`@PRG`, adresses 1..N par proximité) pour installer/ajouter un luminaire
@@ -1151,8 +1160,24 @@ le **VPN existant** : aucun port à ouvrir, aucun service cloud requis.
 - Carte par carte via la lampe, ou **toutes les cartes** via une automation
   ciblant `light.phs16lc_spot_*` (ou le service `phs16lc.apply_recipe` avec
   `address: all`).
-- Correspondance curseur → courant : `mA = 74 + (2150 − 74) × % / 100`
-  (ex: 50 % ≈ 1112 mA). En dessous de 74 mA, le canal est éteint.
+- **Le curseur (luminosité) est un variateur de recette** : il applique la
+  **dernière recette choisie** (liste « Recette ») dimmée canal par canal, en
+  conservant les rapports d'intensité entre canaux — courbe linéaire de 74 mA
+  (curseur à 1) à la recette à 100 % (curseur à 255). La luminosité affichée est
+  le **% de la recette** (ex: 50 % = la moitié de chaque canal de la recette).
+- Sans recette choisie, le curseur est **inactif** : `turn_on` avec luminosité
+  renvoie l'erreur « choisissez d'abord une recette ». `turn_on` sans luminosité
+  réapplique la recette à 100 % (sinon 500 mA uniforme, tous canaux).
+- **Protection matérielle (D24)** : tout courant envoyé — curseur, recette,
+  scène, services `phs16lc.set_channels` / `set_channel` — est clampé canal par
+  canal au **courant max des LED** (tableau §10, surchargeable via
+  `<config>/phs16lc/led_max.json`). Un clamp est signalé dans les logs et par
+  l'événement `phs16lc_led_clamped` (logbook) ; le variateur à 100 % met chaque
+  canal au plus à son max LED, jamais au-delà. En dessous de 74 mA, le canal est
+  éteint.
+- Attributs de la lampe : `recette` (active), `channels_ma` (courants lus par
+  canal au dernier polling), `led_max` (table appliquée), `brightness` = % de la
+  recette.
 
 ### 6.3 Recettes lumineuses et scènes
 
@@ -1452,3 +1477,52 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ENV{ID_SERI
   série (TX + RX) — ne pas inverser leurs rôles dans le formulaire.
 - L'instance HA tournant en venv sur le MacBook Pro (§3.4) est un environnement
   de **développement** : la production tourne sur le PC Linux dédié (§5).
+
+---
+
+## 10. Spécifications des canaux LED du luminaire PHS16-LC
+
+Chaque carte PHS16-LC pilote **16 canaux LED indépendants** en courant (plage du
+protocole : 74–2150 mA par canal ; toute valeur < 74 mA éteint le canal). Le
+tableau ci-dessous — fourni par le fabricant (Twin Development SA / GDTech SA) —
+donne pour chaque canal le **type de LED**, le **courant maximal** autorisé par
+ces LED, et la proposition de **courant de test « pleine charge »** : allumer le
+plus de canaux possible, au plus fort, sans dépasser la capacité des LED ni
+celle du driver.
+
+| Canal → | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Type de LED | RE | WH | FR | RE | FR | WH | RE | BL | FR | WH | RE | BL | RE | WH | FR | RE |
+| Courant max (mA) | 1400 | 1800 | 1000 | 1400 | 1000 | 1800 | 1400 | 2000 | 1000 | 1800 | 1400 | 2000 | 1400 | 1800 | 1000 | 1400 |
+| Test pleine charge (mA) | 600 | 1600 | 600 | 600 | 600 | 1600 | 600 | 1600 | 600 | 1600 | 600 | 1600 | 600 | 1600 | 600 | 600 |
+
+Légende : **RE** = rouge (red, ~660 nm) · **WH** = blanc (white) · **FR** = rouge
+lointain (far-red, ~730 nm) · **BL** = bleu (blue, ~450 nm).
+
+- **Ne jamais dépasser le « courant max » du tableau** : le driver accepte
+  jusqu'à 2150 mA par canal, mais un canal **FR est limité à 1000 mA** et un
+  canal **RE à 1400 mA** — pousser 2150 mA sur tous les canaux grillerait ces
+  LED. Respecter ces plafonds canal par canal dans chaque recette.
+- **Depuis la v0.53, ces plafonds sont appliqués automatiquement** (D24) : toute
+  trame `@SP` envoyée par l'intégration (curseur, recette, scène, services
+  `set_channels`/`set_channel`) est clampée canal par canal à ces valeurs, avec
+  événement `phs16lc_led_clamped` en cas de clamp. La table peut être
+  surchargée par installation via `<config>/phs16lc/led_max.json` (à côté de
+  `groups.json`) : liste `[1400, 1800, …]` ou `{"channels": [...]}` — rechargée
+  à chaque cycle de polling, aucun redémarrage.
+- Le **test pleine charge** totalise **15 600 mA** sur les 16 canaux (contre
+  23 600 mA si chaque canal était à son max individuel) : c'est la proposition
+  du fabricant pour valider une installation en conditions réelles sans
+  stresser les LED.
+- Dans HA, une entité `light` applique un courant **uniforme** sur les 16
+  canaux (§9) : pour respecter ces limites canal par canal, utiliser une
+  **recette** — par exemple la recette « test pleine charge » ci-dessous, à
+  enregistrer dans `<config>/phs16lc/recipes/` :
+
+  ```json
+  {
+    "name": "test_pleine_charge",
+    "description": "Test pleine charge fabricant : 600 mA sur les canaux RE/FR, 1600 mA sur WH/BL — total 15 600 mA, sous le max de chaque canal",
+    "channels": [600, 1600, 600, 600, 600, 1600, 600, 1600, 600, 1600, 600, 1600, 600, 1600, 600, 600]
+  }
+  ```

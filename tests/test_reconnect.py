@@ -98,7 +98,8 @@ async def test_reconnect_when_port_comes_back_restores_state(
 
     new_link = FakePhsLink.instances[-1]
     assert new_link is not old_link
-    assert coordinator.link is new_link
+    # D24 : coordinator.link est le wrapper LedClampLink (garde-fou LED) autour du lien réel
+    assert getattr(coordinator.link, "wrapped", coordinator.link) is new_link
     assert coordinator.last_update_success is True
     assert len(reconnected) == 1
     assert reconnected[0].data["port"] == "/dev/fake0"

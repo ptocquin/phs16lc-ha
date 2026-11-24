@@ -108,7 +108,8 @@ async def test_options_change_port_reloads_entry_on_new_port(hass, monkeypatch, 
     assert new_link is not old_link
     new_coordinator = hass.data[DOMAIN][entry.entry_id]
     assert new_coordinator is not coordinator
-    assert new_coordinator.link is new_link
+    # D24 : coordinator.link est le wrapper LedClampLink (garde-fou LED) autour du lien réel
+    assert getattr(new_coordinator.link, "wrapped", new_coordinator.link) is new_link
     assert entry.state == ConfigEntryState.LOADED
 
 

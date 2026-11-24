@@ -31,8 +31,11 @@ from .const import (
     CONF_RX_PORT,
     DEFAULT_CHANNELS,
     DEFAULT_FAMILY,
+    DEFAULT_LED_MAX_MA,
     DOMAIN,
+    EVENT_DIMMED,
     EVENT_GROUP_RECIPE_APPLIED,
+    EVENT_LED_CLAMPED,
     EVENT_LINK_LOST,
     EVENT_PROVISIONED,
     EVENT_RECIPE_APPLIED,
@@ -43,8 +46,12 @@ from .const import (
     FAMILY_LUMIATEC,
     LINK_ERROR_THRESHOLD,
     RECONNECT_MIN_DELAY,
+    clamp_led_vector,
+    dim_vector,
     entry_value,
     groups_file_for,
+    led_max_file_for,
+    load_led_max,
     recipes_dir_for_entry,
     scenes_dir_for,
     sync_state_file_for,
@@ -64,6 +71,7 @@ from .phs16ctl.controller import (
 )
 from .phs16ctl.link import T_GI, PhsLink
 from .phs16ctl.lumiatec import LUMIATEC
+from .phs16ctl.protocol import CURRENT_MAX_MA
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +86,7 @@ class SpotState:
     temperatures: tuple[float, float, float] | None = None  # @GT (cpu, led1, led2)
     last_recipe: str | None = None  # dernière recette appliquée en entier (D11)
     last_group: str | None = None  # dernier groupe appliqué en partiel (select « Groupe »)
+    last_vector: list[int] | None = None  # recette à 100 % clampée LED (D23/D24) — base du dimmer
 
 
 @dataclass
@@ -119,6 +128,48 @@ def _rescan(link: PhsLink, expected: int, family: str = DEFAULT_FAMILY) -> list[
     return scan_line(link, expected=expected)
 
 
+class LedClampLink:
+    """Garde-fou matériel (D24) : wrapper du PhsLink — clamp canal par canal, aux max
+    LED (`led_max` du coordinator, rechargeable à chaud), les courants de TOUTE trame
+    `@SP` envoyée (slider, recettes, scènes, services set_channels/set_channel, groupes).
+
+    Famille lumiatec : aucun clamp (pas de table LED). Tout le reste est délégué au
+    lien réel (`__getattr__`) : `port`, `close()`, etc.
+    """
+
+    def __init__(self, link: PhsLink, *, family: str, led_max_getter, on_clamp) -> None:
+        self.wrapped = link
+        self._family = family
+        self._led_max_getter = led_max_getter
+        self._on_clamp = on_clamp
+
+    def send(self, cmd: str, addr: int, params: str = "", timeout: float = 0.0):
+        if cmd == "SP" and self._family != FAMILY_LUMIATEC:
+            values = params.split()
+            led_max = self._led_max_getter()
+            out: list[str] = []
+            clamped: list[tuple[int, int, int]] = []
+            for i, v in enumerate(values):
+                try:
+                    iv = int(v)
+                except ValueError:
+                    out.append(v)
+                    continue
+                m = led_max[i] if i < len(led_max) else CURRENT_MAX_MA
+                if iv > m:
+                    clamped.append((i + 1, iv, m))
+                    out.append(str(m))
+                else:
+                    out.append(v)
+            if clamped:
+                params = " ".join(out) + " "
+                self._on_clamp(addr, clamped)
+        return self.wrapped.send(cmd, addr, params, timeout)
+
+    def __getattr__(self, name: str):
+        return getattr(self.wrapped, name)
+
+
 class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
     """Polling périodique de la ligne PHS16-LC."""
 
@@ -130,9 +181,13 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             update_interval=timedelta(seconds=int(entry_value(entry, CONF_POLL_INTERVAL))),
         )
         self.entry = entry
-        self.link = link
         #: famille de luminaires du bus de cette entrée ("phs16-lc" ou "lumiatec")
         self.family = str(entry_value(entry, CONF_FAMILY) or DEFAULT_FAMILY)
+        #: table des courants max LED par canal (D24) — rechargée à chaque polling
+        self.led_max: list[int] = list(DEFAULT_LED_MAX_MA)
+        # Garde-fou matériel (D24) : toute trame @SP envoyée est clampée aux max LED.
+        # Famille lumiatec : pas de table LED, lien brut.
+        self.link = self._wrap_link(link)
         #: master lumiatec élu par validation @GE OK (mis à jour à chaque rescan) —
         #: PAS la plus petite adresse : le fw exige le luminaire physiquement premier
         #: sur le bus (mesuré en prod 2026-11-20, adresses 131/136 -> master 136)
@@ -155,6 +210,48 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         """Exécute `func(*args)` en executor, sérialisé (port série unique)."""
         async with self._io_lock:
             return await self.hass.async_add_executor_job(functools.partial(func, *args, **kwargs))
+
+    def _on_led_clamp(self, address: int, clamped: list[tuple[int, int, int]]) -> None:
+        """Callback de clamp LED (D24) : log + événement HA. Peut être appelé depuis un
+        thread executor (LedClampLink) -> l'événement est posté via `call_soon_threadsafe`."""
+        _LOGGER.warning(
+            "SPOT %s : %d canal(x) clampé(s) au max LED (D24) : %s",
+            address,
+            len(clamped),
+            ", ".join(f"canal {c}: {r}->{a} mA" for c, r, a in clamped),
+        )
+        self.hass.loop.call_soon_threadsafe(
+            self.hass.bus.async_fire,
+            EVENT_LED_CLAMPED,
+            {
+                "address": address,
+                "clamped": [
+                    {"channel": c, "requested_ma": r, "applied_ma": a} for c, r, a in clamped
+                ],
+            },
+        )
+
+    def _wrap_link(self, link: PhsLink):
+        """Wrappe le lien dans le garde-fou LED (D24) — phs16-lc uniquement."""
+        if self.family == FAMILY_LUMIATEC:
+            return link
+        return LedClampLink(
+            link,
+            family=self.family,
+            led_max_getter=lambda: self.led_max,
+            on_clamp=self._on_led_clamp,
+        )
+
+    async def _async_reload_led_max(self) -> None:
+        """Recharge la table des max LED (`led_max.json` à côté de groups.json, D24)
+        à chaque cycle de polling (lecture disque en executor, jamais dans le event loop)."""
+        if self.family == FAMILY_LUMIATEC:
+            return
+        path = led_max_file_for(recipes_dir_for_entry(self.entry))
+        led_max = await self.async_io(load_led_max, path)
+        if led_max != self.led_max:
+            _LOGGER.info("Table LED max rechargée depuis %s : %s", path, led_max)
+            self.led_max = led_max
 
     async def async_ensure_link(self) -> PhsLink:
         """Retourne le lien série ouvert, en tentant une réouverture si le port a
@@ -260,12 +357,13 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                 online=True,
                 last_recipe=prev.last_recipe if prev is not None else None,
                 last_group=prev.last_group if prev is not None else None,
+                last_vector=prev.last_vector if prev is not None else None,
             )
         for a, spot in old_spots.items():
             if a not in spots:
                 spot.online = False
                 spots[a] = spot
-        self.link = link
+        self.link = self._wrap_link(link)
         if self.data is not None:
             self.data.link = link
             self.data.spots = spots
@@ -311,6 +409,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         )
         self.sync_state = await self.async_io(load_sync_state, self.sync_state_path)
         await self._async_reload_groups()
+        await self._async_reload_led_max()
 
     async def _async_reload_groups(self) -> None:
         """Recharge groups.json (executor) et resynchronise labels/areas des registres.
@@ -343,6 +442,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def _async_update_data(self) -> Phs16Data:
         await self._async_reload_groups()
+        await self._async_reload_led_max()
         # si le port a disparu (B2), tente d'abord la reconnexion : UpdateFailed
         # sinon -> last_update_success False -> entités « unavailable »
         link = await self.async_ensure_link()
@@ -434,13 +534,21 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
         link = await self.async_ensure_link()
 
-        def _do() -> None:
+        def _do() -> list[int] | None:
             recipe = Recipe.from_file(recipe_path)
-            dev = self._lum(link, address, power=True)
+            n = self._member_channels(address)
+            dev = self._lum(link, address, power=True, channels=n)
+            if group is None:
+                vec = recipe.full_vector(n)
+                dev.set_channels(vec)  # clamp LED au niveau du lien (D24, événement si clamp)
+                if self.family != FAMILY_LUMIATEC:
+                    return clamp_led_vector(vec, self.led_max)[0]
+                return vec
             dev.apply_recipe(recipe, group=group)
+            return None
 
         try:
-            await self._link_io(_do)
+            vector = await self._link_io(_do)
         except (LuminaireError, OSError, ValueError, KeyError) as exc:
             self.hass.bus.async_fire(
                 EVENT_RECIPE_APPLIED,
@@ -456,12 +564,117 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         spot = self.data.spots.get(address)
         if spot is not None and group is None:
             spot.last_recipe = recipe_name
+            spot.last_vector = vector
         self.hass.bus.async_fire(
             EVENT_RECIPE_APPLIED,
             {"address": address, "recipe": recipe_name, "group": group, "ok": True},
         )
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
+
+    async def async_dim_recipe(self, address: int, recipe_name: str, brightness: int) -> None:
+        """D23 : applique la recette `recipe_name` dimmée au niveau HA `brightness` (1..255).
+
+        Courbe linéaire canal par canal : 74 mA à b=1, recette clampée LED (D24) à b=255.
+        Le clamp LED reste actif au niveau du lien (LedClampLink) quoi qu'il arrive.
+        Mémorise `last_vector` (recette à 100 % clampée) pour le ratio affiché par le slider.
+        Tire `phs16lc_dimmed`. Lève LuminaireError/OSError/ValueError/KeyError en cas d'échec.
+        """
+        recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
+        link = await self.async_ensure_link()
+        b = max(1, min(255, int(brightness)))
+
+        def _do() -> tuple[list[int], list[tuple[int, int, int]]]:
+            recipe = Recipe.from_file(recipe_path)
+            n = self._member_channels(address)
+            dev = self._lum(link, address, power=True, channels=n)
+            base = recipe.full_vector(n)
+            if self.family == FAMILY_LUMIATEC:
+                clamped, idx = base, []
+            else:
+                clamped, idx = clamp_led_vector(base, self.led_max)
+            details = [(c, base[c - 1], clamped[c - 1]) for c in idx]
+            dev.set_channels(dim_vector(clamped, b, self.led_max))
+            return clamped, details
+
+        clamped, clamp_details = await self._link_io(_do)
+        if clamp_details:
+            self._on_led_clamp(address, clamp_details)  # recette au-dessus d'un max LED (D24)
+        spot = self.data.spots.get(address)
+        if spot is not None:
+            spot.last_recipe = recipe_name
+            spot.last_vector = clamped
+        self.hass.bus.async_fire(
+            EVENT_DIMMED,
+            {
+                "address": address,
+                "recipe": recipe_name,
+                "brightness": b,
+                "dim_percent": round(100 * b / 255),
+            },
+        )
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
+
+    async def async_dim_recipe_group(self, group_id: str, brightness: int) -> dict[int, str | None]:
+        """D23 appliqué à un groupe : dimme la dernière recette de chaque membre au niveau
+        `brightness` (1..255). Retourne {address: erreur_ou_None} — un membre sans recette
+        choisie est en erreur (« aucune recette ») sans bloquer les autres.
+        """
+        addresses = self.group_addresses(group_id)
+        recipes_dir = recipes_dir_for_entry(self.entry)
+        link = await self.async_ensure_link()
+        b = max(1, min(255, int(brightness)))
+
+        def _do() -> tuple[dict[int, str | None], dict[int, list[int]], dict[int, list]]:
+            results: dict[int, str | None] = {}
+            vectors: dict[int, list[int]] = {}
+            clamps: dict[int, list] = {}
+            for address in addresses:
+                spot = self.data.spots.get(address)
+                recipe_name = spot.last_recipe if spot is not None else None
+                try:
+                    if not recipe_name:
+                        results[address] = "aucune recette choisie (liste « Recette »)"
+                        continue
+                    recipe = Recipe.from_file(recipes_dir / recipe_name)
+                    n = self._member_channels(address)
+                    dev = self._lum(link, address, power=True, channels=n)
+                    base = recipe.full_vector(n)
+                    if self.family == FAMILY_LUMIATEC:
+                        clamped, idx = base, []
+                    else:
+                        clamped, idx = clamp_led_vector(base, self.led_max)
+                    dev.set_channels(dim_vector(clamped, b, self.led_max))
+                    results[address] = None
+                    vectors[address] = clamped
+                    if idx:
+                        clamps[address] = [(c, base[c - 1], clamped[c - 1]) for c in idx]
+                except (LuminaireError, OSError, ValueError, KeyError) as exc:
+                    results[address] = str(exc)
+            return results, vectors, clamps
+
+        results, vectors, clamps = await self._link_io(_do)
+        for address, details in clamps.items():
+            self._on_led_clamp(address, details)  # recette au-dessus d'un max LED (D24)
+        for address, error in results.items():
+            spot = self.data.spots.get(address)
+            if error is None and spot is not None:
+                spot.last_vector = vectors.get(address)
+            self.hass.bus.async_fire(
+                EVENT_DIMMED,
+                {
+                    "address": address,
+                    "group_id": group_id,
+                    "recipe": spot.last_recipe if spot is not None else None,
+                    "brightness": b,
+                    "dim_percent": round(100 * b / 255),
+                    "ok": error is None,
+                    "error": error,
+                },
+            )
+        await self.async_refresh()
+        return results
 
     async def async_save(self, address: int) -> None:
         """Sauvegarde les courants en NVM (@WP). Tire `phs16lc_saved`. Lève LuminaireError."""
@@ -568,23 +781,33 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         recipe_path = recipes_dir_for_entry(self.entry) / recipe_name
         link = await self.async_ensure_link()
 
-        def _do() -> dict[int, str | None]:
+        def _do() -> tuple[dict[int, str | None], dict[int, list[int]]]:
             recipe = Recipe.from_file(recipe_path)  # lève OSError/ValueError -> propagate
             results: dict[int, str | None] = {}
+            vectors: dict[int, list[int]] = {}
             for address in addresses:
-                dev = self._lum(link, address, power=True)
+                n = self._member_channels(address)
+                dev = self._lum(link, address, power=True, channels=n)
                 try:
-                    dev.apply_recipe(recipe, group=group)
+                    if group is None:
+                        vec = recipe.full_vector(n)
+                        dev.set_channels(vec)  # clamp LED au niveau du lien (D24)
+                        if self.family != FAMILY_LUMIATEC:
+                            vec = clamp_led_vector(vec, self.led_max)[0]
+                        vectors[address] = vec
+                    else:
+                        dev.apply_recipe(recipe, group=group)
                     results[address] = None
                 except LuminaireError as exc:
                     results[address] = str(exc)
-            return results
+            return results, vectors
 
-        results = await self._link_io(_do)
+        results, vectors = await self._link_io(_do)
         for address, error in results.items():
             spot = self.data.spots.get(address)
             if error is None and group is None and spot is not None:
                 spot.last_recipe = recipe_name
+                spot.last_vector = vectors.get(address)
             self.hass.bus.async_fire(
                 EVENT_RECIPE_APPLIED,
                 {
@@ -705,8 +928,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         recipes_dir = recipes_dir_for_entry(self.entry)
         link = await self.async_ensure_link()
 
-        def _do() -> dict[int, str | None]:
+        def _do() -> tuple[dict[int, str | None], dict[int, list[int]]]:
             results: dict[int, str | None] = {}
+            vectors: dict[int, list[int]] = {}
             for address in addresses:
                 n = self._member_channels(address)
                 dev = self._lum(link, address, power=True, channels=n)
@@ -714,14 +938,22 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
                 recipe_name = spot.last_recipe if spot is not None else None
                 try:
                     if recipe_name:
-                        dev.apply_recipe(Recipe.from_file(recipes_dir / recipe_name))
+                        vec = Recipe.from_file(recipes_dir / recipe_name).full_vector(n)
+                        dev.set_channels(vec)  # clamp LED au niveau du lien (D24)
+                        if self.family != FAMILY_LUMIATEC:
+                            vec = clamp_led_vector(vec, self.led_max)[0]
+                        vectors[address] = vec
                     else:
                         dev.set_channels([DEFAULT_CURRENT_MA] * n)
                     results[address] = None
                 except (LuminaireError, OSError, ValueError, KeyError) as exc:
                     results[address] = str(exc)
-            return results
+            return results, vectors
 
-        results = await self._link_io(_do)
+        results, vectors = await self._link_io(_do)
+        for address, error in results.items():
+            spot = self.data.spots.get(address)
+            if error is None and spot is not None and address in vectors:
+                spot.last_vector = vectors[address]
         await self.async_refresh()
         return results

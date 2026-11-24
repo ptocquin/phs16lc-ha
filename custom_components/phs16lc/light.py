@@ -1,11 +1,16 @@
-"""Entité light : une carte SPOT = une lampe (on/off + luminosité, mA en coulisses).
+"""Entité light : une carte SPOT = une lampe (on/off + variateur de recette, mA en coulisses).
 
-Sémantique (décisions D10/D11 du PLAN) :
-- état « on » = au moins un canal ≥ 74 mA ; luminosité affichée = courant max (mA → 0..255) ;
-- `turn_on(brightness=b)` = tous les canaux au même courant `brightness_to_ma(b)` ;
-- `turn_on()` sans luminosité = réapplique la dernière recette de la carte si elle
-  existe, sinon `DEFAULT_CURRENT_MA` (500 mA) sur tous les canaux ;
-- `turn_off()` = tous les canaux à 0.
+Sémantique (décisions D10/D11/D23/D24 du PLAN) :
+- état « on » = au moins un canal ≥ 74 mA ;
+- `turn_on(brightness=b)` = **dimmer de la dernière recette** (D23) : la recette est
+  scalée canal par canal (courbe linéaire 74 mA à b=1 → recette à b=255), jamais un
+  courant uniforme ; sans recette choisie → erreur « choisissez d'abord une recette » ;
+- `turn_on()` sans luminosité = réapplique la dernière recette à 100 % (D11), sinon
+  `DEFAULT_CURRENT_MA` (500 mA) sur tous les canaux ;
+- `turn_off()` = tous les canaux à 0 ;
+- la luminosité affichée = ratio retrouvé par rapport à la recette (dernier vecteur
+  connu), sinon courant max des canaux (mA → 0..255, D10) ;
+- tout courant envoyé est clampé canal par canal aux max LED (D24, GUIDE §10).
 """
 
 from __future__ import annotations
@@ -19,7 +24,15 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEFAULT_CHANNELS, DOMAIN, brightness_to_ma, ma_to_brightness, min_on_ma
+from .const import (
+    DEFAULT_CHANNELS,
+    DOMAIN,
+    FAMILY_LUMIATEC,
+    brightness_from_vector,
+    brightness_to_ma,
+    ma_to_brightness,
+    min_on_ma,
+)
 from .coordinator import Phs16Coordinator
 from .entity import Phs16Entity, add_group_entities_listener, group_device_info
 from .phs16ctl.controller import DEFAULT_CURRENT_MA, LuminaireError
@@ -92,7 +105,28 @@ class SpotLight(Phs16Entity, LightEntity):
         spot = self._spot()
         if spot is None or not spot.online or spot.currents is None:
             return None
+        # D23 : ratio du dimmer retrouvé par rapport à la dernière recette (si les
+        # courants lus correspondent encore à un dimming de cette recette)
+        if spot.last_vector and self._family != FAMILY_LUMIATEC:
+            b = brightness_from_vector(spot.currents, spot.last_vector, self.coordinator.led_max)
+            if b is not None:
+                return b
+        # repli D10 : courant max des canaux (recette inconnue ou modifiée ailleurs, ex. CLI)
         return ma_to_brightness(max(spot.currents), self._family)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """`recette` active, courants lus par canal (`channels_ma`) et table des max LED."""
+        spot = self._spot()
+        attrs: dict[str, Any] = {}
+        if spot is not None:
+            if spot.last_recipe:
+                attrs["recette"] = spot.last_recipe
+            if spot.currents:
+                attrs["channels_ma"] = list(spot.currents)
+        if self._family != FAMILY_LUMIATEC:
+            attrs["led_max"] = list(self.coordinator.led_max)
+        return attrs
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         spot = self._spot()
@@ -100,8 +134,21 @@ class SpotLight(Phs16Entity, LightEntity):
             return
         try:
             if ATTR_BRIGHTNESS in kwargs:
-                ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]), self._family)
-                await self.coordinator.async_set_channels(self.address, [ma] * self._channels())
+                if self._family == FAMILY_LUMIATEC:
+                    # lumiatec : pas de table LED par canal — le slider reste le mapping
+                    # step uniforme (D10 lumiatec), D23 ne s'applique qu'au PHS16-LC
+                    ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]), self._family)
+                    await self.coordinator.async_set_channels(self.address, [ma] * self._channels())
+                elif not spot.last_recipe:
+                    # D23 : le slider dimme la dernière recette — jamais un courant uniforme
+                    raise HomeAssistantError(
+                        f"SPOT {self.address} : choisissez d'abord une recette "
+                        "(liste « Recette ») avant d'utiliser le variateur"
+                    )
+                else:
+                    await self.coordinator.async_dim_recipe(
+                        self.address, spot.last_recipe, int(kwargs[ATTR_BRIGHTNESS])
+                    )
             elif spot.last_recipe:
                 await self.coordinator.async_apply_recipe(self.address, spot.last_recipe)
             else:
@@ -119,10 +166,11 @@ class SpotLight(Phs16Entity, LightEntity):
 
 
 class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
-    """Lampe d'un groupe de luminaires (phase 10) : on/off + luminosité sur tous les membres.
+    """Lampe d'un groupe de luminaires (phase 10) : on/off + variateur de recette (D23).
 
     Entité principale du device « Groupe <name> » (`name=None`). `turn_on` sans
-    luminosité réapplique la dernière recette de chaque membre (D11), sinon 500 mA.
+    luminosité réapplique la dernière recette de chaque membre (D11), sinon 500 mA ;
+    `turn_on(brightness=b)` dimme la dernière recette de chaque membre (D23).
     """
 
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
@@ -167,6 +215,13 @@ class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
         spots = [s for s in self._spots() if s.online and s.currents]
         if not spots:
             return None
+        # D23 : ratio du dimmer d'un membre dont la recette est connue, sinon repli D10
+        if self.coordinator.family != FAMILY_LUMIATEC:
+            for s in spots:
+                if s.last_vector:
+                    b = brightness_from_vector(s.currents, s.last_vector, self.coordinator.led_max)
+                    if b is not None:
+                        return b
         return ma_to_brightness(max(max(s.currents) for s in spots), self.coordinator.family)
 
     @property
@@ -192,8 +247,17 @@ class GroupLight(CoordinatorEntity[Phs16Coordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         if ATTR_BRIGHTNESS in kwargs:
-            ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]), self.coordinator.family)
-            await self._run_group(self.coordinator.async_set_channels_group(self._group_id, ma))
+            if self.coordinator.family == FAMILY_LUMIATEC:
+                # lumiatec : slider = step uniforme (D10 lumiatec), pas de dimmer de recette
+                ma = brightness_to_ma(int(kwargs[ATTR_BRIGHTNESS]), self.coordinator.family)
+                await self._run_group(self.coordinator.async_set_channels_group(self._group_id, ma))
+            else:
+                # D23 : le slider dimme la dernière recette de chaque membre
+                await self._run_group(
+                    self.coordinator.async_dim_recipe_group(
+                        self._group_id, int(kwargs[ATTR_BRIGHTNESS])
+                    )
+                )
         else:
             # D11 appliqué au groupe : dernière recette de chaque membre, sinon 500 mA
             await self._run_group(self.coordinator.async_restore_group(self._group_id))

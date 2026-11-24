@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from homeassistant.const import CONF_PORT  # noqa: F401  (réexporté pour les autres modules)
@@ -41,6 +42,8 @@ EVENT_PROVISIONED = f"{DOMAIN}_provisioned"
 EVENT_GROUP_RECIPE_APPLIED = f"{DOMAIN}_group_recipe_applied"
 EVENT_LINK_LOST = f"{DOMAIN}_link_lost"
 EVENT_RECONNECTED = f"{DOMAIN}_reconnected"
+EVENT_LED_CLAMPED = f"{DOMAIN}_led_clamped"  # D24 : un courant demandé a été clampé au max LED
+EVENT_DIMMED = f"{DOMAIN}_dimmed"  # D23 : slider = recette dimmée à `brightness`
 
 # Reconnexion automatique du port série (B2) : après ce nombre d'erreurs I/O
 # consécutives (OSError pyserial, ex. adaptateur débranché à chaud) le port est
@@ -51,6 +54,29 @@ RECONNECT_MIN_DELAY = 5.0  # secondes min entre deux tentatives de réouverture
 # Groupes de luminaires (phase 10) : fichier groups.json à côté du dossier des recettes
 GROUPS_FILENAME = "groups.json"
 DEFAULT_CHANNELS = 16
+
+# Spécifications LED du PHS16-LC (D24, GUIDE §10) : courant max (mA) par canal 1..16,
+# selon le type de LED soudé sur la carte (RE=1400, WH=1800, FR=1000, BL=2000).
+# Surchargeable par installation via `led_max.json` à côté de groups.json.
+DEFAULT_LED_MAX_MA: list[int] = [
+    1400,
+    1800,
+    1000,
+    1400,
+    1000,
+    1800,
+    1400,
+    2000,
+    1000,
+    1800,
+    1400,
+    2000,
+    1400,
+    1800,
+    1000,
+    1400,
+]
+LED_MAX_FILENAME = "led_max.json"
 
 
 # HA OS 16+ monte la config en `/homeassistant` dans les add-ons, mais le
@@ -94,6 +120,11 @@ def scenes_dir_for(recipes_dir: str | Path) -> Path:
 def groups_file_for(recipes_dir: str | Path) -> Path:
     """Fichier des groupes de luminaires = `groups.json` à côté du dossier des recettes (résolu)."""
     return resolve_config_path(str(Path(recipes_dir).parent / GROUPS_FILENAME))
+
+
+def led_max_file_for(recipes_dir: str | Path) -> Path:
+    """Fichier de surcharge des max LED = `led_max.json` à côté de groups.json (résolu)."""
+    return resolve_config_path(str(Path(recipes_dir).parent / LED_MAX_FILENAME))
 
 
 # État persisté de la synchro des registres (labels/areas) : permet de ne jamais
@@ -146,3 +177,98 @@ def ma_to_brightness(ma: int, family: str = DEFAULT_FAMILY) -> int:
     if ma < CURRENT_MIN_MA:
         return 0
     return max(1, round((ma - CURRENT_MIN_MA) * 255 / (CURRENT_MAX_MA - CURRENT_MIN_MA)))
+
+
+# ----------------------------------------------------------------------
+# Spécifications LED par canal (D24) et dimmer de recette (D23)
+# ----------------------------------------------------------------------
+def load_led_max(path: str | Path) -> list[int]:
+    """Charge la table des courants max LED par canal (D24).
+
+    Fichier JSON optionnel `led_max.json` (à côté de groups.json) : soit une liste
+    `[1400, 1800, ...]`, soit `{"channels": [...]}`. Valeurs clampées à
+    [0, CURRENT_MAX_MA]. Fichier absent ou illisible → `DEFAULT_LED_MAX_MA` (GUIDE §10).
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        return list(DEFAULT_LED_MAX_MA)
+    raw = data.get("channels") if isinstance(data, dict) else data
+    if not isinstance(raw, list) or not raw:
+        return list(DEFAULT_LED_MAX_MA)
+    try:
+        values = [int(v) for v in raw]
+    except TypeError, ValueError:
+        return list(DEFAULT_LED_MAX_MA)
+    return [max(0, min(CURRENT_MAX_MA, v)) for v in values]
+
+
+def _led_max_at(led_max: list[int], index: int) -> int:
+    """Max LED du canal `index` (0-based) ; hors table → max driver (pas de limite connue)."""
+    return led_max[index] if index < len(led_max) else CURRENT_MAX_MA
+
+
+def clamp_led_vector(currents: list[int], led_max: list[int]) -> tuple[list[int], list[int]]:
+    """Clamp canal par canal aux max LED (D24).
+
+    Retourne (vecteur clampé, canaux clampés 1-based).
+    """
+    out: list[int] = []
+    clamped: list[int] = []
+    for i, c in enumerate(currents):
+        m = _led_max_at(led_max, i)
+        if c > m:
+            clamped.append(i + 1)
+            out.append(m)
+        else:
+            out.append(c)
+    return out, clamped
+
+
+def dim_vector(recipe: list[int], brightness: int, led_max: list[int]) -> list[int]:
+    """Dimmer d'une recette (D23) : courbe linéaire canal par canal, de 74 mA (b=1)
+    à la recette clampée LED (b=255) : `ma_i = 74 + (recette_i - 74) * b / 255`.
+    Canaux à 0 dans la recette → 0 ; b=0 → tout éteint.
+    """
+    b = max(0, min(255, int(brightness)))
+    out: list[int] = []
+    for i, r in enumerate(recipe):
+        if b <= 0 or r <= 0:
+            out.append(0)
+            continue
+        r = min(r, _led_max_at(led_max, i))
+        out.append(round(CURRENT_MIN_MA + (r - CURRENT_MIN_MA) * b / 255))
+    return out
+
+
+def brightness_from_vector(
+    currents: list[int], recipe: list[int], led_max: list[int]
+) -> int | None:
+    """Ratio inverse du dimmer (D23) : `b` tel que `dim_vector(recipe, b) ≈ currents`.
+
+    Canal de référence = canal de la recette clampée le plus élevé (> 74 mA).
+    Retourne None si la recette n'allume aucun canal, ou si les courants lus ne
+    correspondent pas à un dimming de la recette (modification externe, ex. CLI) :
+    l'appelant retombe alors sur l'affichage « courant max » (D10).
+    """
+    ref: int | None = None
+    ref_ma = 0
+    for i, r in enumerate(recipe):
+        r = min(r, _led_max_at(led_max, i))
+        if r > CURRENT_MIN_MA and r > ref_ma:
+            ref, ref_ma = i, r
+    if ref is None or ref >= len(currents):
+        return None
+    ma = currents[ref]
+    if ma <= 0:
+        return 0
+    b = max(1, min(255, round(255 * (ma - CURRENT_MIN_MA) / (ref_ma - CURRENT_MIN_MA))))
+    # cohérence : chaque canal allumé de la recette doit matcher à ± max(12 mA, 4 %)
+    for i, r in enumerate(recipe):
+        if r <= 0 or i >= len(currents):
+            continue
+        r = min(r, _led_max_at(led_max, i))
+        expected = round(CURRENT_MIN_MA + (r - CURRENT_MIN_MA) * b / 255)
+        if abs(currents[i] - expected) > max(12, round(0.04 * expected)):
+            return None
+    return b

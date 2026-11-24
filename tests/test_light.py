@@ -1,4 +1,5 @@
-"""Tests de l'entité light (phase 2) : mapping mA↔brightness, turn_on/off, D11."""
+"""Tests de l'entité light (phase 2 + D23/D24) : mapping mA↔brightness, turn_on/off,
+dimmer de recette (slider), clamp LED, D11."""
 
 from __future__ import annotations
 
@@ -11,7 +12,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.phs16lc.const import DOMAIN, brightness_to_ma, ma_to_brightness
+from custom_components.phs16lc.const import (
+    DEFAULT_LED_MAX_MA,
+    DOMAIN,
+    EVENT_DIMMED,
+    EVENT_LED_CLAMPED,
+    brightness_to_ma,
+    clamp_led_vector,
+    dim_vector,
+    ma_to_brightness,
+)
 from custom_components.phs16lc.phs16ctl.controller import DEFAULT_CURRENT_MA
 
 from .fake_bus import FakePhsLink, FakeSpot
@@ -104,19 +114,66 @@ async def test_light_non_uniform_recipe_shows_max(hass, monkeypatch, tmp_path) -
 # ----------------------------------------------------------------------
 # Commandes
 # ----------------------------------------------------------------------
-async def test_turn_on_with_brightness_maps_to_ma(hass, monkeypatch, tmp_path) -> None:
+async def test_turn_on_brightness_without_recipe_raises(hass, monkeypatch, tmp_path) -> None:
+    """D23 : sans recette choisie, le slider est inactif (erreur explicite, aucun @SP)."""
     bus = {1: FakeSpot(currents=[0] * 16)}
     entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
     lid = _light_id(hass, entry, 1)
 
-    await _turn_on(hass, lid, brightness=255)
-    assert coord.data.spots[1].currents == [2150] * 16
-    assert hass.states.get(lid).attributes["brightness"] == 255
+    with pytest.raises(HomeAssistantError, match="recette"):
+        await _turn_on(hass, lid, brightness=200)
+    assert coord.data.spots[1].currents == [0] * 16  # rien envoyé
 
+
+async def test_turn_on_brightness_dims_last_recipe(hass, monkeypatch, tmp_path) -> None:
+    """D23 : le slider dimme la dernière recette canal par canal (jamais uniforme)."""
+    (tmp_path / "croissance.json").write_text(
+        json.dumps({"name": "croissance", "channels": [800] * 8 + [0] * 8}), encoding="utf-8"
+    )
+    bus = {1: FakeSpot(currents=[0] * 16)}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    lid = _light_id(hass, entry, 1)
+    coord.data.spots[1].last_recipe = "croissance.json"
+    dimmed_events: list = []
+    hass.bus.async_listen(EVENT_DIMMED, dimmed_events.append)
+
+    # b=255 -> recette à 100 % (800 < max LED des canaux 1-8 -> pas de clamp)
+    await _turn_on(hass, lid, brightness=255)
+    assert coord.data.spots[1].currents == [800] * 8 + [0] * 8
+    assert hass.states.get(lid).attributes["brightness"] == 255
+    assert coord.data.spots[1].last_vector == [800] * 8 + [0] * 8
+
+    # b=128 -> courbe linéaire 74..800 : ma = 74 + (800-74)*128/255 = 438
     await _turn_on(hass, lid, brightness=128)
-    ma = brightness_to_ma(128)
-    assert coord.data.spots[1].currents == [ma] * 16
+    expected = dim_vector([800] * 8 + [0] * 8, 128, DEFAULT_LED_MAX_MA)
+    assert coord.data.spots[1].currents == expected
+    assert expected[:8] == [438] * 8 and expected[8:] == [0] * 8
     assert hass.states.get(lid).attributes["brightness"] == 128
+    assert len(dimmed_events) == 2
+    assert dimmed_events[1].data["dim_percent"] == round(100 * 128 / 255)
+
+
+async def test_turn_on_brightness_clamps_recipe_to_led_max(hass, monkeypatch, tmp_path) -> None:
+    """D24 : une recette qui dépasse le max LED d'un canal est clampée (canaux FR=1000)."""
+    (tmp_path / "floraison.json").write_text(
+        json.dumps({"name": "floraison", "channels": [1200] * 16}), encoding="utf-8"
+    )
+    bus = {1: FakeSpot(currents=[0] * 16)}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    lid = _light_id(hass, entry, 1)
+    coord.data.spots[1].last_recipe = "floraison.json"
+    clamp_events: list = []
+    hass.bus.async_listen(EVENT_LED_CLAMPED, clamp_events.append)
+
+    await _turn_on(hass, lid, brightness=255)
+    clamped, channels = clamp_led_vector([1200] * 16, DEFAULT_LED_MAX_MA)
+    assert coord.data.spots[1].currents == clamped
+    assert channels == [3, 5, 9, 15]  # canaux FR à 1000 mA
+    assert coord.data.spots[1].last_vector == clamped
+    assert len(clamp_events) == 1
+    assert [c["channel"] for c in clamp_events[0].data["clamped"]] == [3, 5, 9, 15]
+    # le slider affiche toujours 255 : la recette à 100 % EST le clampé
+    assert hass.states.get(lid).attributes["brightness"] == 255
 
 
 async def test_turn_on_without_brightness_uses_default_ma(hass, monkeypatch, tmp_path) -> None:
@@ -142,9 +199,14 @@ async def test_turn_on_without_brightness_reapplies_last_recipe(
 
     await _turn_on(hass, lid)
     assert coord.data.spots[1].currents == [800] * 8 + [0] * 8
+    assert coord.data.spots[1].last_vector == [800] * 8 + [0] * 8
     s = hass.states.get(lid)
     assert s.state == "on"
-    assert s.attributes["brightness"] == ma_to_brightness(800)
+    # D23 : le slider affiche le % de la recette (100 %), pas le courant max (D10)
+    assert s.attributes["brightness"] == 255
+    assert s.attributes["recette"] == "croissance.json"
+    assert s.attributes["channels_ma"] == [800] * 8 + [0] * 8
+    assert s.attributes["led_max"] == DEFAULT_LED_MAX_MA
 
 
 async def test_turn_off_sends_zeros(hass, monkeypatch, tmp_path) -> None:
@@ -158,9 +220,13 @@ async def test_turn_off_sends_zeros(hass, monkeypatch, tmp_path) -> None:
 
 
 async def test_turn_on_dead_card_raises_homeassistant_error(hass, monkeypatch, tmp_path) -> None:
+    (tmp_path / "croissance.json").write_text(
+        json.dumps({"name": "croissance", "channels": [800] * 16}), encoding="utf-8"
+    )
     bus = {1: FakeSpot()}
-    entry, _ = await _setup(hass, monkeypatch, bus, tmp_path)
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
     lid = _light_id(hass, entry, 1)
+    coord.data.spots[1].last_recipe = "croissance.json"
 
     bus[1].alive = False  # la carte ne répond plus
     with pytest.raises(HomeAssistantError):

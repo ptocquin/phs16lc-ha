@@ -351,20 +351,37 @@ async def test_group_light_members_attribute_lists_addresses(
     assert state.attributes["members"] == [1]
 
 
-async def test_group_light_turn_on_brightness_applies_to_all_members(
+async def test_group_light_turn_on_brightness_dims_recipe_of_all_members(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """D23 : le slider du groupe dimme la dernière recette de chaque membre."""
+    bus = {1: FakeSpot(currents=[0] * 16), 2: FakeSpot(currents=[0] * 16)}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
+    light_id = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_nord_light")
+    coord.data.spots[1].last_recipe = "croissance.json"
+    coord.data.spots[2].last_recipe = "croissance.json"
+
+    await _call(hass, LIGHT_DOMAIN, "turn_on", {"entity_id": light_id, "brightness": 128})
+
+    expected = [438] * 8 + [0] * 8  # dim_vector(croissance, 128) : 74+(800-74)*128/255 = 438
+    assert coord.data.spots[1].currents == expected
+    assert coord.data.spots[2].currents == expected
+    state = hass.states.get(light_id)
+    assert state.state == "on"
+    assert state.attributes["brightness"] == 128
+
+
+async def test_group_light_turn_on_brightness_without_recipe_raises(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D23 : sans recette sur les membres, le slider du groupe est inactif (erreur)."""
     bus = {1: FakeSpot(currents=[0] * 16), 2: FakeSpot(currents=[0] * 16)}
     entry, coord = await _setup(hass, monkeypatch, bus, tmp_path)
     light_id = _entity_id(hass, LIGHT_DOMAIN, entry, f"{entry.entry_id}_group_serre_1_nord_light")
 
-    await _call(hass, LIGHT_DOMAIN, "turn_on", {"entity_id": light_id, "brightness": 255})
-
-    assert coord.data.spots[1].currents == [2150] * 16
-    assert coord.data.spots[2].currents == [2150] * 16
-    state = hass.states.get(light_id)
-    assert state.state == "on"
-    assert state.attributes["brightness"] == 255
+    with pytest.raises(HomeAssistantError, match="recette"):
+        await _call(hass, LIGHT_DOMAIN, "turn_on", {"entity_id": light_id, "brightness": 200})
+    assert coord.data.spots[1].currents == [0] * 16
 
 
 async def test_group_light_turn_off_and_default_on(
