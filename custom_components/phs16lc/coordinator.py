@@ -34,6 +34,7 @@ from .const import (
     DOMAIN,
     EVENT_GROUP_RECIPE_APPLIED,
     EVENT_LINK_LOST,
+    EVENT_PROVISIONED,
     EVENT_RECIPE_APPLIED,
     EVENT_RECONNECTED,
     EVENT_SAVED,
@@ -54,9 +55,11 @@ from .phs16ctl.controller import (
     DEFAULT_CURRENT_MA,
     CardResult,
     LuminaireError,
+    ProvisionedSpot,
     Recipe,
     Scene,
     apply_scene,
+    provision_line,
     scan_line,
 )
 from .phs16ctl.link import T_GI, PhsLink
@@ -362,6 +365,47 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         await self.async_refresh()
         self.hass.bus.async_fire(EVENT_SCANNED, {"addresses": addresses, "count": len(addresses)})
         return addresses
+
+    async def async_provision_line(self) -> list[ProvisionedSpot]:
+        """Re-provisionnement MANUEL de la ligne (bouton « Reprogrammer la ligne » /
+        service `phs16lc.provision`, README §5.2) : `@UNP` broadcast (reset de
+        TOUTES les adresses) puis boucle `@DI`/`@PRG` allouant 1..N par proximité.
+
+        /!\\ Jamais appelé par le polling : un SPOT qui perd son adresse ne doit
+        pas déclencher de reprogrammation automatique de la ligne (règle projet).
+
+        phs16-lc uniquement (lumiatec : adresses fixes). Après ré-allocation,
+        les adresses ont pu changer : on rescanne pour reconstruire les états et
+        notifier les plateformes (entités ajoutées/retirées). Tire
+        `phs16lc_provisioned` puis `phs16lc_scan`. Lève LuminaireError/OSError.
+        """
+        if self.family == FAMILY_LUMIATEC:
+            raise LuminaireError(
+                "Le re-provisionnement @UNP/@PRG n'existe qu'en phs16-lc "
+                "(lumiatec : adresses fixes, scan @GS)"
+            )
+        link = await self.async_ensure_link()
+        expected = int(entry_value(self.entry, CONF_EXPECTED_SPOTS))
+        spots = await self._link_io(provision_line, link, expected or 255)
+        _LOGGER.info(
+            "Provisionnement PHS16-LC : %d carte(s) programmée(s) : %s",
+            len(spots),
+            [f"{s.address}->0x{s.serial:08x}" for s in spots],
+        )
+        self.hass.bus.async_fire(
+            EVENT_PROVISIONED,
+            {
+                "count": len(spots),
+                "spots": [
+                    {"address": s.address, "serial": f"0x{s.serial:08x}", "firmware": s.firmware}
+                    for s in spots
+                ],
+            },
+        )
+        # les adresses ont pu changer : rescan complet (reconstruit les états,
+        # ajoute/retire les entités, refresh direct)
+        await self.async_rescan()
+        return spots
 
     # ------------------------------------------------------------------
     # Commandes (phases 2+ : light, select, button, services)

@@ -30,6 +30,7 @@ from .phs16ctl.controller import LuminaireError
 
 SERVICES = (
     "scan",
+    "provision",
     "apply_recipe",
     "apply_scene",
     "save",
@@ -111,6 +112,19 @@ def _parse_currents(raw: object) -> list[int]:
 async def _handle_scan(call: ServiceCall) -> None:
     for coordinator in _coordinators(call.hass):
         await coordinator.async_rescan()
+
+
+async def _handle_provision(call: ServiceCall) -> None:
+    """Re-provisionnement manuel de la ligne (@UNP + @DI/@PRG, README §5.2).
+
+    Action d'installation délibérément explicite (jamais depuis le polling) :
+    réinitialise toutes les adresses du bus puis les réalloue 1..N par proximité.
+    """
+    for coordinator in _coordinators(call.hass):
+        try:
+            await coordinator.async_provision_line()
+        except _ERRORS as exc:
+            raise HomeAssistantError(f"Re-provisionnement de la ligne : {exc}") from exc
 
 
 async def _handle_apply_recipe(call: ServiceCall) -> None:
@@ -453,6 +467,7 @@ async def _handle_delete_recipe(call: ServiceCall) -> None:
 
 _HANDLERS = {
     "scan": _handle_scan,
+    "provision": _handle_provision,
     "apply_recipe": _handle_apply_recipe,
     "apply_scene": _handle_apply_scene,
     "save": _handle_save,

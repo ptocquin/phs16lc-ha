@@ -8,12 +8,13 @@ par canal, appliquer une recette, sauvegarder en NVM, scanner la ligne.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import lumiatec as lum
 from . import protocol as proto
-from .link import T_GI, T_GP, T_GT, T_SP, T_WP, PhsLink
+from .link import T_DI, T_GI, T_GP, T_GT, T_PRG, T_SP, T_UNP, T_WP, PhsLink
 
 #: Courant par défaut pour `on()` quand aucun mA n'est précisé.
 DEFAULT_CURRENT_MA = 500
@@ -251,6 +252,91 @@ def scan_line(link: PhsLink, expected: int = 0) -> list[int]:
         found.append(address)
         address += 1
     return found
+
+
+# ------------------------------------------------------------------
+# Provisionnement de la ligne (installation / ajout / remplacement)
+# ------------------------------------------------------------------
+
+#: @UNP en broadcast : nombre max de tentatives avant d'abandonner.
+UNPROGRAM_MAX_TRIES = 20
+#: @DI : nombre d'essais au silence avant de conclure à la fin de l'énumération.
+DISCOVER_TRIES = 3
+#: @PRG refusée pour un même SN : nombre d'essais avant d'abandonner.
+PRG_MAX_FAILURES = 3
+#: Délai après un @UNP bien reçu (laisse le fw appliquer le reset).
+DELAY_AFTER_UNPROGRAM = 0.5
+#: Délai entre deux @PRG (écriture NVM de l'adresse).
+DELAY_AFTER_PRG = 0.15
+
+
+@dataclass
+class ProvisionedSpot:
+    """Un SPOT auquel une adresse réseau vient d'être allouée (@PRG)."""
+
+    address: int
+    serial: int  # numéro de série (0x...)
+    firmware: str
+
+
+def provision_line(link: PhsLink, max_spots: int = 255) -> list[ProvisionedSpot]:
+    """Reprogramme la ligne entière (README §5.2) : `@UNP` en broadcast répété
+    jusqu'au silence (tous les SPOT repassent « non programmé »), puis boucle
+    `@DI` / `@PRG` allouant les adresses 1..N par proximité au PC.
+
+    /!\\ Réservé à l'installation et à l'ajout **manuel** d'un luminaire :
+    ne JAMAIS appeler depuis un refresh périodique — un SPOT qui perd son
+    adresse ne doit pas déclencher de reprogrammation automatique de la ligne.
+
+    Lève LuminaireError si `@UNP` reste refusée (câblage / alim bus) ou si un
+    `@PRG` est refusé plusieurs fois. Retourne les SPOT programmés (liste vide
+    si aucun SPOT non programmé n'a répondu à `@DI`).
+    """
+    for _ in range(UNPROGRAM_MAX_TRIES):
+        resp = link.send("UNP", 0, timeout=T_UNP)
+        if resp is None:
+            # silence = tous les SPOT ont décodé la commande
+            time.sleep(DELAY_AFTER_UNPROGRAM)
+            break
+        # sinon réponse (NAK = mal décodé) : on recommence
+    else:
+        raise LuminaireError(
+            f"@UNP toujours refusée après {UNPROGRAM_MAX_TRIES} tentatives — "
+            "vérifier le câblage RS-485 et l'alimentation 12–24 V du bus"
+        )
+    spots: list[ProvisionedSpot] = []
+    prg_failures: dict[int, int] = {}
+    next_address = 1
+    tries = DISCOVER_TRIES
+    while next_address <= max_spots:
+        resp = link.send("DI", 0, timeout=T_DI)
+        if resp is None:
+            tries -= 1
+            if tries > 0:
+                continue
+            break  # plus de SPOT non programmé
+        identity = proto.decode_identity(resp)
+        if identity is None:
+            tries = DISCOVER_TRIES
+            time.sleep(0.05)
+            continue
+        serial_number, firmware = identity
+        prg = link.send("PRG", 0, f"0x{serial_number:x} {next_address}", timeout=T_PRG)
+        if prg is None or prg.is_nak:
+            prg_failures[serial_number] = prg_failures.get(serial_number, 0) + 1
+            if prg_failures[serial_number] >= PRG_MAX_FAILURES:
+                raise LuminaireError(
+                    f"@PRG refusée {PRG_MAX_FAILURES} fois pour le SPOT 0x{serial_number:08x}"
+                )
+            tries = DISCOVER_TRIES
+            continue
+        spots.append(
+            ProvisionedSpot(address=next_address, serial=serial_number, firmware=firmware)
+        )
+        next_address += 1
+        tries = DISCOVER_TRIES
+        time.sleep(DELAY_AFTER_PRG)
+    return spots
 
 
 # ------------------------------------------------------------------
