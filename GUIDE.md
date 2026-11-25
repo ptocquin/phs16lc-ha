@@ -4,6 +4,11 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.54 — 2026-11-25 — §10 : **spec LED dans un seul fichier
+> `led_spec.json`** (D25) — `{"channels": [max mA…], "types": ["RE","WH",…]}` ;
+> l'ancien `led_max.json` reste lu en repli. La lampe expose aussi l'attribut
+> `led_types`, ce qui permet à la carte Lovelace d'afficher **un slider par type
+> de LED** (RE/WH/FR/BL) au lieu des 16 canaux.
 > Version : 0.53 — 2026-11-24 — §6.2/§10 : **variateur de recette (D23) + clamp LED
 > systématique (D24)** — le slider dimme la dernière recette canal par canal (jamais
 > de courant uniforme) et tout courant envoyé est clampé aux max LED du §10
@@ -1171,13 +1176,14 @@ le **VPN existant** : aucun port à ouvrir, aucun service cloud requis.
 - **Protection matérielle (D24)** : tout courant envoyé — curseur, recette,
   scène, services `phs16lc.set_channels` / `set_channel` — est clampé canal par
   canal au **courant max des LED** (tableau §10, surchargeable via
-  `<config>/phs16lc/led_max.json`). Un clamp est signalé dans les logs et par
-  l'événement `phs16lc_led_clamped` (logbook) ; le variateur à 100 % met chaque
-  canal au plus à son max LED, jamais au-delà. En dessous de 74 mA, le canal est
-  éteint.
+  `<config>/phs16lc/led_spec.json`, champ `channels`). Un clamp est signalé dans
+  les logs et par l'événement `phs16lc_led_clamped` (logbook) ; le variateur à
+  100 % met chaque canal au plus à son max LED, jamais au-delà. En dessous de
+  74 mA, le canal est éteint.
 - Attributs de la lampe : `recette` (active), `channels_ma` (courants lus par
-  canal au dernier polling), `led_max` (table appliquée), `brightness` = % de la
-  recette.
+  canal au dernier polling), `led_max` (max mA appliqués par canal),
+  `led_types` (type de LED par canal, ex. RE/WH/FR/BL — sert à la carte Lovelace
+  pour grouper les canaux par type), `brightness` = % de la recette.
 
 ### 6.3 Recettes lumineuses et scènes
 
@@ -1506,10 +1512,24 @@ lointain (far-red, ~730 nm) · **BL** = bleu (blue, ~450 nm).
 - **Depuis la v0.53, ces plafonds sont appliqués automatiquement** (D24) : toute
   trame `@SP` envoyée par l'intégration (curseur, recette, scène, services
   `set_channels`/`set_channel`) est clampée canal par canal à ces valeurs, avec
-  événement `phs16lc_led_clamped` en cas de clamp. La table peut être
-  surchargée par installation via `<config>/phs16lc/led_max.json` (à côté de
-  `groups.json`) : liste `[1400, 1800, …]` ou `{"channels": [...]}` — rechargée
-  à chaque cycle de polling, aucun redémarrage.
+  événement `phs16lc_led_clamped` en cas de clamp.
+- **Depuis la v0.54, toute la spec LED tient dans un seul fichier**
+  `<config>/phs16lc/led_spec.json` (à côté de `groups.json`, D25) : les courants
+  max **et** les types de LED par canal, rechargés à chaque cycle de polling
+  (aucun redémarrage) :
+
+  ```json
+  {
+    "channels": [1400, 1800, 1000, 1400, 1000, 1800, 1400, 2000, 1000, 1800, 1400, 2000, 1400, 1800, 1000, 1400],
+    "types": ["RE", "WH", "FR", "RE", "FR", "WH", "RE", "BL", "FR", "WH", "RE", "BL", "RE", "WH", "FR", "RE"]
+  }
+  ```
+
+  Une liste seule `[1400, 1800, …]` reste acceptée (les types retombent sur le
+  tableau ci-dessus), et l'ancien fichier `led_max.json` est encore lu en repli
+  s'il n'y a pas de `led_spec.json`. La lampe expose la spec appliquée via les
+  attributs `led_max` (mA) et `led_types` (RE/WH/FR/BL) — c'est ce qui permet à la
+  carte Lovelace `phs16lc-spot-card` d'afficher un slider par type de LED.
 - Le **test pleine charge** totalise **15 600 mA** sur les 16 canaux (contre
   23 600 mA si chaque canal était à son max individuel) : c'est la proposition
   du fabricant pour valider une installation en conditions réelles sans
