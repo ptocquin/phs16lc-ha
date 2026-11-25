@@ -5,6 +5,10 @@ Plan de l'intégration Home Assistant qui expose les luminaires PHS16-LC
 local et à distance (via le VPN de l'entreprise).
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 1.7 — 2026-11-25 — **D25 FAIT** (branche `feature/led-spec-types`, 156
+> tests OK) : spec LED en un seul fichier `led_spec.json` (`channels` + `types`,
+> repli legacy `led_max.json`) ; attribut `led_types` exposé sur la lampe ; carte
+> Lovelace v1.2.0 = un slider par type de LED (RE/WH/FR/BL). GUIDE v0.54.
 > Version : 1.6 — 2026-11-19 — **phase 11 FAITE** (B2 + B3, 110 tests OK, à releaser
 > v1.3.1) : reconnexion auto du port série à chaud + port/RX modifiables dans
 > l'options flow. Backlog restant : §10.2 B4–B5.
@@ -81,6 +85,7 @@ local et à distance (via le VPN de l'entreprise).
 | D22 | Ciblage d'un groupe | Entités dédiées par groupe (device groupe relié au hub : `light` + `select` recette + `button` save NVM) **et** `address: "group:<id>"` accepté par les services `phs16lc.*` ; événement `phs16lc_recipe_applied` par membre + récapitulatif de groupe, échec partiel non bloquant (comme `apply_scene`) | Une recette s'applique à tout un groupe en un clic (UI) ou une seule ligne (automation photopériode), sans parser de noms d'entités. |
 | D23 | Sémantique du slider `brightness` (phs16-lc) | Le curseur = **variateur de la dernière recette** (jamais un courant uniforme) : `turn_on(brightness=b)` applique la recette scalée canal par canal, courbe linéaire `ma_i = 74 + (recette_i − 74)·b/255` (b=1 → 74 mA, b=255 → recette). Sans recette choisie → erreur « choisissez d'abord une recette ». `turn_on()` sans luminosité = recette à 100 % (D11 inchangé). Le slider affiché = % de la recette retrouvé (attribut `last_vector`), repli sur courant max (D10) si modifié hors dimmer. **lumiatec inchangé** : slider = step uniforme (D10). | Les cartes 16 canaux ont des max LED très différents (GUIDE §10) : un courant uniforme à 2150 mA grillerait les canaux FR (1000 mA). Le dimmer conserve les rapports spectraux de la recette. |
 | D24 | Clamp systématique aux max LED (phs16-lc) | Table `DEFAULT_LED_MAX_MA` (16 valeurs, GUIDE §10), surchargeable par `<config>/phs16lc/led_max.json` (liste ou `{"channels": [...]}`), rechargée à chaque polling. Garde-fou au niveau du lien (`LedClampLink`) : **toute** trame `@SP` envoyée (slider, recettes, scènes, services `set_channels`/`set_channel`, groupes) est clampée canal par canal ; clamp → warning log + événement `phs16lc_led_clamped`. `SpotState.last_vector` = recette à 100 % clampée (base du ratio D23). Famille lumiatec : aucun clamp. | Protection matérielle totale : aucun chemin d'envoi ne peut dépasser le max LED d'un canal, même par erreur ou via un service bas niveau. |
+| D25 | Spec LED en un seul fichier `led_spec.json` + types exposés | `DEFAULT_LED_TYPES` (16 types, GUIDE §10) à côté de `DEFAULT_LED_MAX_MA` ; `load_led_spec()` lit `led_spec.json` (`{"channels": [...], "types": [...]}` ou liste seule), repli legacy sur `led_max.json` ; rechargé à chaque polling (`_async_reload_led_spec`). Entité `light` expose `led_max` **et** `led_types` → la carte Lovelace groupe les canaux par type de LED (un slider RE/WH/FR/BL, envoyé via `set_channels` vecteur complet). | Une seule source de vérité pour la spec des canaux (max mA + identité LED), et une UI compacte par type de LED au lieu de 16 sliders. |
 
 ## 3. Architecture
 
@@ -312,6 +317,13 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] `light.py` : `SpotLight`/`GroupLight` — `turn_on(brightness)` = dimmer de la dernière recette (erreur sans recette, phs16-lc uniquement ; lumiatec = step uniforme D10), `brightness` = ratio D23 (repli D10), attributs `recette` / `channels_ma` / `led_max`
 - [x] Services `set_channels`/`set_channel` : couverts par le clamp lien (aucun changement de code)
 - [x] Tests : `tests/test_led_max.py` (fonctions pures + clamp lien via `FakePhsLink.sent` + surcharge JSON), `test_light.py` (dimmer, erreur sans recette, clamp recette, attributs), `test_groups.py` (dim groupe), `test_select.py` (clamp partiel), `test_reconnect.py`/`test_options.py` (wrapper `.wrapped`) → **151 tests passed**, ruff clean
+
+### Phase 15 — Spec LED `led_spec.json` + carte par type de LED (D25) — FAITE (2026-11-25, v1.8.0, 156 tests OK, branche `feature/led-spec-types` mergée dans develop)
+- [x] `const.py` : `DEFAULT_LED_TYPES` (RE/WH/FR/BL × 16, GUIDE §10), `LED_SPEC_FILENAME = "led_spec.json"`, `led_spec_file_for`, `load_led_spec()` (`{"channels": [...], "types": [...]}` ou liste seule, repli legacy `led_max.json`, rechargé à chaud)
+- [x] `coordinator.py` : `_async_reload_led_spec` (recharge max + types à chaque polling), `self.led_types`
+- [x] `light.py` : attribut `led_types` exposé à côté de `led_max` (clamp D24 inchangé)
+- [x] ha-card v1.2.0 : un slider par type de LED (RE/WH/FR/BL) quand `led_types` exposé — envoi du vecteur complet via `phs16lc.set_channels`, borné au max LED du type, canaux en tooltip ; repli 16 sliders canal sinon / `show_channels: "channels"` ; `false` masque ; `save_recipe` reconstruit le vecteur en mode types ; smoke node 21 checks OK
+- [x] Tests : `tests/test_led_spec.py` (renommé depuis `test_led_max.py` : formes liste/dict, types normalisés, repli legacy, clamp lien, attributs `led_max`/`led_types`) → **156 tests passed**, ruff clean ; GUIDE v0.54
 
 ### Phase 13 — Re-provisionnement manuel de la ligne depuis HA — FAITE (2026-11-24, v1.6.0, 137 tests OK)
 - [x] Bouton hub **« Reprogrammer la ligne »** + service **`phs16lc.provision`** (`button.py`, `services.py`, `services.yaml`, `strings.json` + fr/en) : `@UNP` broadcast (reset de toutes les adresses) puis boucle `@DI`/`@PRG` réallouant **1..N par proximité au PC** ; événement `phs16lc_provisioned` + rescan à chaud (entités recréées immédiatement)

@@ -32,6 +32,7 @@ from .const import (
     DEFAULT_CHANNELS,
     DEFAULT_FAMILY,
     DEFAULT_LED_MAX_MA,
+    DEFAULT_LED_TYPES,
     DOMAIN,
     EVENT_DIMMED,
     EVENT_GROUP_RECIPE_APPLIED,
@@ -51,7 +52,8 @@ from .const import (
     entry_value,
     groups_file_for,
     led_max_file_for,
-    load_led_max,
+    led_spec_file_for,
+    load_led_spec,
     recipes_dir_for_entry,
     scenes_dir_for,
     sync_state_file_for,
@@ -183,8 +185,9 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.entry = entry
         #: famille de luminaires du bus de cette entrée ("phs16-lc" ou "lumiatec")
         self.family = str(entry_value(entry, CONF_FAMILY) or DEFAULT_FAMILY)
-        #: table des courants max LED par canal (D24) — rechargée à chaque polling
+        #: spec LED par canal (D24/D25) : courants max (mA) et types — rechargée à chaque polling
         self.led_max: list[int] = list(DEFAULT_LED_MAX_MA)
+        self.led_types: list[str] = list(DEFAULT_LED_TYPES)
         # Garde-fou matériel (D24) : toute trame @SP envoyée est clampée aux max LED.
         # Famille lumiatec : pas de table LED, lien brut.
         self.link = self._wrap_link(link)
@@ -242,16 +245,19 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
             on_clamp=self._on_led_clamp,
         )
 
-    async def _async_reload_led_max(self) -> None:
-        """Recharge la table des max LED (`led_max.json` à côté de groups.json, D24)
-        à chaque cycle de polling (lecture disque en executor, jamais dans le event loop)."""
+    async def _async_reload_led_spec(self) -> None:
+        """Recharge la spec LED (`led_spec.json` à côté de groups.json, repli legacy
+        `led_max.json`, D24/D25) à chaque cycle de polling (lecture disque en executor,
+        jamais dans le event loop)."""
         if self.family == FAMILY_LUMIATEC:
             return
-        path = led_max_file_for(recipes_dir_for_entry(self.entry))
-        led_max = await self.async_io(load_led_max, path)
-        if led_max != self.led_max:
-            _LOGGER.info("Table LED max rechargée depuis %s : %s", path, led_max)
+        recipes_dir = recipes_dir_for_entry(self.entry)
+        path = led_spec_file_for(recipes_dir)
+        led_max, led_types = await self.async_io(load_led_spec, path, led_max_file_for(recipes_dir))
+        if led_max != self.led_max or led_types != self.led_types:
+            _LOGGER.info("Spec LED rechargée depuis %s : max=%s types=%s", path, led_max, led_types)
             self.led_max = led_max
+            self.led_types = led_types
 
     async def async_ensure_link(self) -> PhsLink:
         """Retourne le lien série ouvert, en tentant une réouverture si le port a
@@ -409,7 +415,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         )
         self.sync_state = await self.async_io(load_sync_state, self.sync_state_path)
         await self._async_reload_groups()
-        await self._async_reload_led_max()
+        await self._async_reload_led_spec()
 
     async def _async_reload_groups(self) -> None:
         """Recharge groups.json (executor) et resynchronise labels/areas des registres.
@@ -442,7 +448,7 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
 
     async def _async_update_data(self) -> Phs16Data:
         await self._async_reload_groups()
-        await self._async_reload_led_max()
+        await self._async_reload_led_spec()
         # si le port a disparu (B2), tente d'abord la reconnexion : UpdateFailed
         # sinon -> last_update_success False -> entités « unavailable »
         link = await self.async_ensure_link()

@@ -55,9 +55,9 @@ RECONNECT_MIN_DELAY = 5.0  # secondes min entre deux tentatives de réouverture
 GROUPS_FILENAME = "groups.json"
 DEFAULT_CHANNELS = 16
 
-# Spécifications LED du PHS16-LC (D24, GUIDE §10) : courant max (mA) par canal 1..16,
-# selon le type de LED soudé sur la carte (RE=1400, WH=1800, FR=1000, BL=2000).
-# Surchargeable par installation via `led_max.json` à côté de groups.json.
+# Spécifications LED du PHS16-LC (D24/D25, GUIDE §10) : courant max (mA) et type de
+# LED par canal 1..16, selon la carte LED soudée (RE=1400, WH=1800, FR=1000, BL=2000).
+# Surchargeable par installation via `led_spec.json` à côté de groups.json.
 DEFAULT_LED_MAX_MA: list[int] = [
     1400,
     1800,
@@ -76,6 +76,26 @@ DEFAULT_LED_MAX_MA: list[int] = [
     1000,
     1400,
 ]
+DEFAULT_LED_TYPES: list[str] = [
+    "RE",
+    "WH",
+    "FR",
+    "RE",
+    "FR",
+    "WH",
+    "RE",
+    "BL",
+    "FR",
+    "WH",
+    "RE",
+    "BL",
+    "RE",
+    "WH",
+    "FR",
+    "RE",
+]
+LED_SPEC_FILENAME = "led_spec.json"
+#: ancien nom du fichier de spec (avant D25) — relu en repli si led_spec.json est absent
 LED_MAX_FILENAME = "led_max.json"
 
 
@@ -122,8 +142,13 @@ def groups_file_for(recipes_dir: str | Path) -> Path:
     return resolve_config_path(str(Path(recipes_dir).parent / GROUPS_FILENAME))
 
 
+def led_spec_file_for(recipes_dir: str | Path) -> Path:
+    """Fichier de spec LED = `led_spec.json` à côté de groups.json (résolu)."""
+    return resolve_config_path(str(Path(recipes_dir).parent / LED_SPEC_FILENAME))
+
+
 def led_max_file_for(recipes_dir: str | Path) -> Path:
-    """Fichier de surcharge des max LED = `led_max.json` à côté de groups.json (résolu)."""
+    """Ancien fichier de surcharge `led_max.json` (repli legacy si led_spec.json absent)."""
     return resolve_config_path(str(Path(recipes_dir).parent / LED_MAX_FILENAME))
 
 
@@ -180,27 +205,55 @@ def ma_to_brightness(ma: int, family: str = DEFAULT_FAMILY) -> int:
 
 
 # ----------------------------------------------------------------------
-# Spécifications LED par canal (D24) et dimmer de recette (D23)
+# Spécifications LED par canal (D24/D25 : max mA + type de LED) et dimmer (D23)
 # ----------------------------------------------------------------------
-def load_led_max(path: str | Path) -> list[int]:
-    """Charge la table des courants max LED par canal (D24).
+def load_led_spec(
+    path: str | Path, legacy_path: str | Path | None = None
+) -> tuple[list[int], list[str]]:
+    """Charge la spec LED par canal (D24/D25) : retourne (courants max mA, types de LED).
 
-    Fichier JSON optionnel `led_max.json` (à côté de groups.json) : soit une liste
-    `[1400, 1800, ...]`, soit `{"channels": [...]}`. Valeurs clampées à
-    [0, CURRENT_MAX_MA]. Fichier absent ou illisible → `DEFAULT_LED_MAX_MA` (GUIDE §10).
+    Fichier JSON optionnel `led_spec.json` (à côté de groups.json) : soit une liste
+    `[1400, 1800, ...]` (types = table par défaut), soit
+    `{"channels": [1400, ...], "types": ["RE", "WH", ...]}`. Si `led_spec.json` est
+    absent, `legacy_path` (ancien `led_max.json`) est relu en repli.
+    Valeurs clampées à [0, CURRENT_MAX_MA] ; `types` aligné sur la longueur de
+    `channels` (tronqué, complété par le type par défaut du canal).
+    Fichier absent ou illisible → (DEFAULT_LED_MAX_MA, DEFAULT_LED_TYPES) (GUIDE §10).
     """
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except OSError, ValueError:
-        return list(DEFAULT_LED_MAX_MA)
+    data = None
+    for p in (path, legacy_path):
+        if p is None:
+            continue
+        try:
+            data = json.loads(Path(p).read_text(encoding="utf-8"))
+            break
+        except OSError, ValueError:
+            continue
+    if data is None:
+        return list(DEFAULT_LED_MAX_MA), list(DEFAULT_LED_TYPES)
     raw = data.get("channels") if isinstance(data, dict) else data
     if not isinstance(raw, list) or not raw:
-        return list(DEFAULT_LED_MAX_MA)
-    try:
-        values = [int(v) for v in raw]
-    except TypeError, ValueError:
-        return list(DEFAULT_LED_MAX_MA)
-    return [max(0, min(CURRENT_MAX_MA, v)) for v in values]
+        channels = list(DEFAULT_LED_MAX_MA)
+    else:
+        try:
+            channels = [max(0, min(CURRENT_MAX_MA, int(v))) for v in raw]
+        except TypeError, ValueError:
+            channels = list(DEFAULT_LED_MAX_MA)
+    types_raw = data.get("types") if isinstance(data, dict) else None
+    if (
+        isinstance(types_raw, list)
+        and types_raw
+        and all(isinstance(t, str) and t.strip() for t in types_raw)
+    ):
+        types = [t.strip().upper() for t in types_raw]
+    else:
+        types = list(DEFAULT_LED_TYPES)
+    if len(types) < len(channels):
+        types = types + [
+            DEFAULT_LED_TYPES[i] if i < len(DEFAULT_LED_TYPES) else "?"
+            for i in range(len(types), len(channels))
+        ]
+    return channels, types[: len(channels)]
 
 
 def _led_max_at(led_max: list[int], index: int) -> int:
