@@ -318,6 +318,13 @@ au device hub « Adaptateur PHS16-LC » (identifié par le port série / USB).
 - [x] Services `set_channels`/`set_channel` : couverts par le clamp lien (aucun changement de code)
 - [x] Tests : `tests/test_led_max.py` (fonctions pures + clamp lien via `FakePhsLink.sent` + surcharge JSON), `test_light.py` (dimmer, erreur sans recette, clamp recette, attributs), `test_groups.py` (dim groupe), `test_select.py` (clamp partiel), `test_reconnect.py`/`test_options.py` (wrapper `.wrapped`) → **151 tests passed**, ruff clean
 
+### Phase 15 — Spec LED `led_spec.json` + carte par type de LED (D25) — FAITE (2026-11-25, v1.8.0, 156 tests OK, branche `feature/led-spec-types` mergée dans develop)
+- [x] `const.py` : `DEFAULT_LED_TYPES` (RE/WH/FR/BL × 16, GUIDE §10), `LED_SPEC_FILENAME = "led_spec.json"`, `led_spec_file_for`, `load_led_spec()` (`{"channels": [...], "types": [...]}` ou liste seule, repli legacy `led_max.json`, rechargé à chaud)
+- [x] `coordinator.py` : `_async_reload_led_spec` (recharge max + types à chaque polling), `self.led_types`
+- [x] `light.py` : attribut `led_types` exposé à côté de `led_max` (clamp D24 inchangé)
+- [x] ha-card v1.2.0 : un slider par type de LED (RE/WH/FR/BL) quand `led_types` exposé — envoi du vecteur complet via `phs16lc.set_channels`, borné au max LED du type, canaux en tooltip ; repli 16 sliders canal sinon / `show_channels: "channels"` ; `false` masque ; `save_recipe` reconstruit le vecteur en mode types ; smoke node 21 checks OK
+- [x] Tests : `tests/test_led_spec.py` (renommé depuis `test_led_max.py` : formes liste/dict, types normalisés, repli legacy, clamp lien, attributs `led_max`/`led_types`) → **156 tests passed**, ruff clean ; GUIDE v0.54
+
 ### Phase 13 — Re-provisionnement manuel de la ligne depuis HA — FAITE (2026-11-24, v1.6.0, 137 tests OK)
 - [x] Bouton hub **« Reprogrammer la ligne »** + service **`phs16lc.provision`** (`button.py`, `services.py`, `services.yaml`, `strings.json` + fr/en) : `@UNP` broadcast (reset de toutes les adresses) puis boucle `@DI`/`@PRG` réallouant **1..N par proximité au PC** ; événement `phs16lc_provisioned` + rescan à chaud (entités recréées immédiatement)
 - [x] Séquence partagée dans `phs16ctl` (`controller.provision_line()` + CLI `phs16ctl provision`), vendored resynchronisé ; **jamais** déclenchée par le polling (règle projet) ; phs16-lc uniquement (refus explicite lumiatec)
