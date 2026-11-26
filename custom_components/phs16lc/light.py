@@ -117,7 +117,9 @@ class SpotLight(Phs16Entity, LightEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """`recette` active, courants lus par canal (`channels_ma`), spec LED par canal
-        (`led_max` en mA, `led_types` ex. RE/WH/FR/BL — D24/D25, GUIDE §10)."""
+        (`led_max` en mA, `led_types` ex. RE/WH/FR/BL — D24/D25, GUIDE §10), et paramètres
+        ventilateur lus (@GF) : `fan_low_temp` (°C), `fan_high_temp` (°C), `fan_min_duty` (%)
+        — phs16-lc seul, affichés par la carte Lovelace dans la vue dépliée."""
         spot = self._spot()
         attrs: dict[str, Any] = {}
         if spot is not None:
@@ -128,6 +130,10 @@ class SpotLight(Phs16Entity, LightEntity):
         if self._family != FAMILY_LUMIATEC:
             attrs["led_max"] = list(self.coordinator.led_max)
             attrs["led_types"] = list(self.coordinator.led_types)
+            if spot is not None and spot.fan_settings is not None:
+                attrs["fan_low_temp"] = spot.fan_settings.low_temp
+                attrs["fan_high_temp"] = spot.fan_settings.high_temp
+                attrs["fan_min_duty"] = spot.fan_settings.min_duty
         return attrs
 
     async def async_turn_on(self, **kwargs: Any) -> None:

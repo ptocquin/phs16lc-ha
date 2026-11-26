@@ -212,6 +212,28 @@
         }
       }
     },
+    "set_fan_settings": {
+      "name": "Programmer le ventilateur",
+      "description": "Reprogramme les paramètres du ventilateur d'un SPOT (@SF, phs16-lc uniquement) : température de démarrage, température de pleine vitesse, seuil de démarrage. Action rare — exposée uniquement comme service, sans contrôle dans les cartes. Le protocole ne remonte pas l'état temps réel du ventilateur (pas de vitesse actuelle), seulement ces paramètres programmés (lus par @GF, affichés en attributs du luminaire).",
+      "fields": {
+        "address": {
+          "name": "Adresse",
+          "description": "Numéro de carte (ex: \"1\") ou \"all\" (toutes les cartes)."
+        },
+        "low_temp": {
+          "name": "Température de démarrage (°C)",
+          "description": "Température à partir de laquelle le ventilateur démarre (0-74 °C)."
+        },
+        "high_temp": {
+          "name": "Température de pleine vitesse (°C)",
+          "description": "Température à laquelle le ventilateur tourne à pleine vitesse (1-75 °C, supérieure au démarrage)."
+        },
+        "min_duty": {
+          "name": "Seuil de démarrage (%)",
+          "description": "Vitesse minimale de démarrage, en % de la vitesse maximale (0-100 %)."
+        }
+      }
+    },
     "set_group": {
       "name": "Créer / modifier un groupe de luminaires",
       "description": "Crée ou modifie un groupe de luminaires (membres, nom, couleur, icône, pièce) en réécrivant groups.json — rechargé à chaud, sans redémarrage. Appelez ce service depuis Outils de développement → Actions pour attacher ou détacher des luminaires d'un groupe depuis l'UI.",

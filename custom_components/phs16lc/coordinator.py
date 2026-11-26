@@ -73,7 +73,7 @@ from .phs16ctl.controller import (
 )
 from .phs16ctl.link import T_GI, PhsLink
 from .phs16ctl.lumiatec import LUMIATEC
-from .phs16ctl.protocol import CURRENT_MAX_MA
+from .phs16ctl.protocol import CURRENT_MAX_MA, FanSettings, validate_fan_settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ class SpotState:
     online: bool = False
     currents: list[int] | None = None  # @GP (mA par canal)
     temperatures: tuple[float, float, float] | None = None  # @GT (cpu, led1, led2)
+    fan_settings: FanSettings | None = None  # @GF (phs16-lc seul ; None en lumiatec)
     last_recipe: str | None = None  # dernière recette appliquée en entier (D11)
     last_group: str | None = None  # dernier groupe appliqué en partiel (select « Groupe »)
     last_vector: list[int] | None = None  # recette à 100 % clampée LED (D23/D24) — base du dimmer
@@ -107,6 +108,7 @@ def _poll_spots(link: PhsLink, spots: dict[int, SpotState], family: str = DEFAUL
         if not spot.online:
             spot.currents = None
             spot.temperatures = None
+            spot.fan_settings = None
             continue
         dev = lum.make_luminaire(family, spot.address, link)
         try:
@@ -117,6 +119,15 @@ def _poll_spots(link: PhsLink, spots: dict[int, SpotState], family: str = DEFAUL
             spot.temperatures = dev.read_temperatures()
         except LuminaireError:
             spot.temperatures = None
+        if family != FAMILY_LUMIATEC:
+            # @GF phs16-lc : paramètres ventilateur (en lumiatec, @GF est la
+            # config power/master — aucun ventilateur adressable)
+            try:
+                spot.fan_settings = dev.read_fan_settings()
+            except LuminaireError:
+                spot.fan_settings = None
+        else:
+            spot.fan_settings = None
 
 
 def _rescan(link: PhsLink, expected: int, family: str = DEFAULT_FAMILY) -> list[int]:
@@ -696,6 +707,34 @@ class Phs16Coordinator(DataUpdateCoordinator[Phs16Data]):
         self.hass.bus.async_fire(EVENT_SAVED, {"address": address, "ok": True})
         # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
         await self.async_refresh()
+
+    async def async_set_fan_settings(
+        self, address: int, low_temp: int, high_temp: int, min_duty: int
+    ) -> FanSettings:
+        """Programme les paramètres ventilateur d'une carte (@SF, phs16-lc seul).
+
+        En lumiatec, `@SF` est le bitmask power/master : l'appel est refusé.
+        Valide les bornes (chapitres 5.13/5.14) avant envoi. Met à jour l'état
+        connu du SPOT et rafraîchit. Lève LuminaireError si la carte ne répond
+        pas, ValueError si les valeurs sont hors bornes.
+        """
+        if self.family == FAMILY_LUMIATEC:
+            raise LuminaireError(
+                "pas de paramètres ventilateur en lumiatec — @SF y est le bitmask power/master"
+            )
+        settings = FanSettings(int(low_temp), int(high_temp), int(min_duty))
+        error = validate_fan_settings(settings)
+        if error is not None:
+            raise ValueError(f"paramètres ventilateur invalides : {error}")
+        link = await self.async_ensure_link()
+        dev = self._lum(link, address)
+        await self._link_io(dev.set_fan_settings, settings)
+        spot = self.data.spots.get(address)
+        if spot is not None:
+            spot.fan_settings = settings
+        # refresh direct (pas le debouncer) : l'état doit être à jour juste après la commande
+        await self.async_refresh()
+        return settings
 
     async def async_apply_scene(self, scene_name: str, save: bool = False) -> list[CardResult]:
         """Applique un fichier de scène (dossier `scenes/` à côté de `recipes_dir`)."""

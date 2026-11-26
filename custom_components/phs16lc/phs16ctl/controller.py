@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import lumiatec as lum
 from . import protocol as proto
-from .link import T_DI, T_GI, T_GP, T_GT, T_PRG, T_SP, T_UNP, T_WP, PhsLink
+from .link import T_DI, T_GF, T_GI, T_GP, T_GT, T_PRG, T_SF, T_SP, T_UNP, T_WP, PhsLink
 
 #: Courant par défaut pour `on()` quand aucun mA n'est précisé.
 DEFAULT_CURRENT_MA = 500
@@ -220,6 +220,37 @@ class Luminaire:
         if temps is None:
             raise LuminaireError(f"Réponse @GT illisible à l'adresse {self.address}")
         return temps
+
+    # ------------------------------------------------------------------
+    # Ventilateur (phs16-lc uniquement — en lumiatec, @GF/@SF sont le
+    # bitmask power/master et la config, pas un ventilateur)
+    # ------------------------------------------------------------------
+    def read_fan_settings(self) -> proto.FanSettings:
+        """Lit les paramètres ventilateur (@GF, timeout 1,5 s) :
+        (température de démarrage °C, température de pleine vitesse °C, seuil %)."""
+        resp = self.link.send("GF", self.address, timeout=T_GF)
+        if resp is None:
+            raise LuminaireError(f"Pas de réponse @GF à l'adresse {self.address}")
+        settings = proto.decode_fan_settings(resp)
+        if settings is None:
+            raise LuminaireError(f"Réponse @GF illisible à l'adresse {self.address}")
+        return settings
+
+    def set_fan_settings(self, settings: proto.FanSettings) -> None:
+        """Programme les paramètres ventilateur (@SF).
+
+        La spec (chapitre 5.14) ne prévoit pas de sauvegarde NVM dédiée pour
+        `@SF` (le `@WP` ne sauve que les courants) : la programmation est
+        embarquée dans le SPOT. Valide les bornes avant envoi.
+        """
+        error = proto.validate_fan_settings(settings)
+        if error is not None:
+            raise LuminaireError(f"Paramètres ventilateur invalides : {error}")
+        resp = self.link.send("SF", self.address, settings.as_params(), timeout=T_SF)
+        if resp is None:
+            raise LuminaireError(f"Pas de réponse @SF à l'adresse {self.address}")
+        if resp.is_nak:
+            raise LuminaireError(f"@SF refusé (adresse {self.address}) : {resp.error}")
 
 
 def scan_line(link: PhsLink, expected: int = 0) -> list[int]:

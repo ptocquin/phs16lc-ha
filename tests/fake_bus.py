@@ -20,6 +20,11 @@ class FakeSpot:
     alive: bool = True
     currents: list[int] = field(default_factory=lambda: [0] * 16)
     temps: tuple[float, float, float] = (30.0, 31.0, 32.0)
+    fan: tuple[int, int, int] = (
+        40,
+        60,
+        30,
+    )  # paramètres ventilateur @GF/@SF (dém. °C, pleine °C, seuil %)
     serial: int = 0x1234  # n° de série (provisionnement @DI/@PRG)
     programmed: bool = True  # False = SPOT neuf "non programmé" (adresse usine)
 
@@ -110,6 +115,13 @@ class FakePhsLink:
         if cmd == "GT":
             t = spot.temps
             return proto.Response.parse(f"#GT {t[0]} {t[1]} {t[2]}*00\r".encode())
+        if cmd == "GF":  # paramètres ventilateur (phs16-lc ; en lumiatec @GF = config)
+            return proto.Response.parse(_frame(f"#GF {spot.fan[0]} {spot.fan[1]} {spot.fan[2]}"))
+        if cmd == "SF":  # programmation ventilateur (phs16-lc)
+            parts = params.split()
+            if len(parts) == 3:
+                spot.fan = (int(parts[0]), int(parts[1]), int(parts[2]))
+            return proto.Response.parse(b"ACK*00\r")
         if cmd == "GL":  # cartes LED : type1 sn1 type2 sn2
             return proto.Response.parse(b"#GL 1 0x11 2 0x22*00\r")
         if cmd == "SP":

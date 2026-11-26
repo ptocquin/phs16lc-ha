@@ -4,6 +4,12 @@ Choix du matériel, installation (hardware + software) et utilisation de
 l'intégration Home Assistant qui pilote les luminaires **PHS16-LC** à distance.
 
 > **Document vivant** — mis à jour au fur et à mesure du développement.
+> Version : 0.55 — 2026-11-26 — §6.2/§6.6 : **paramètres ventilateur** — lus au
+> polling (`@GF`, phs16-lc seul), exposés en attributs de la lampe
+> (`fan_low_temp`, `fan_high_temp`, `fan_min_duty`, affichés par la carte Lovelace
+> dans la vue dépliée sous les températures) et reprogrammables via le service
+> `phs16lc.set_fan_settings` (`@SF`). Le protocole ne remonte pas l'état temps
+> réel du ventilateur (pas de vitesse/on-off actuel).
 > Version : 0.54 — 2026-11-25 — §10 : **spec LED dans un seul fichier
 > `led_spec.json`** (D25) — `{"channels": [max mA…], "types": ["RE","WH",…]}` ;
 > l'ancien `led_max.json` reste lu en repli. La lampe expose aussi l'attribut
@@ -1183,7 +1189,11 @@ le **VPN existant** : aucun port à ouvrir, aucun service cloud requis.
 - Attributs de la lampe : `recette` (active), `channels_ma` (courants lus par
   canal au dernier polling), `led_max` (max mA appliqués par canal),
   `led_types` (type de LED par canal, ex. RE/WH/FR/BL — sert à la carte Lovelace
-  pour grouper les canaux par type), `brightness` = % de la recette.
+  pour grouper les canaux par type), `brightness` = % de la recette, et —
+  phs16-lc seul — `fan_low_temp` / `fan_high_temp` / `fan_min_duty` : paramètres
+  ventilateur lus au polling (`@GF`), affichés par la carte Lovelace dans la vue
+  dépliée sous les températures. Le protocole ne remonte pas l'état temps réel
+  du ventilateur (pas de vitesse actuelle ni de on/off manuel).
 
 ### 6.3 Recettes lumineuses et scènes
 
@@ -1265,7 +1275,12 @@ action:
 Disponibles dans Outils de développement → Services :
 `phs16lc.scan`, `phs16lc.provision` (§6.9), `phs16lc.apply_recipe`,
 `phs16lc.apply_scene`, `phs16lc.save`,
-`phs16lc.set_channels` (16 valeurs mA), `phs16lc.set_channel` (un canal).
+`phs16lc.set_channels` (16 valeurs mA), `phs16lc.set_channel` (un canal),
+`phs16lc.set_fan_settings` (**paramètres ventilateur**, phs16-lc seul :
+`address` + `low_temp` 0–74 °C, `high_temp` 1–75 °C, `min_duty` 0–100 % —
+envoie `@SF`, ex. `{"address": "1", "low_temp": 40, "high_temp": 60, "min_duty": 30}`).
+Action délibérément rare : pas de contrôle dans les cartes Lovelace, les
+paramètres lus (`@GF`) y sont simplement affichés en vue dépliée.
 
 ### 6.7 Coexistence avec la CLI `phs16ctl`
 
