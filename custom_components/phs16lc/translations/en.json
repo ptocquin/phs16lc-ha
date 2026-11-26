@@ -212,6 +212,28 @@
         }
       }
     },
+    "set_fan_settings": {
+      "name": "Set fan parameters",
+      "description": "Programs the fan parameters of a SPOT (@SF, phs16-lc only): start temperature, full-speed temperature, start threshold. Rare action — exposed only as a service, with no control in the cards. The protocol does not report the fan's real-time state (no current speed), only these programmed parameters (read via @GF, exposed as attributes of the light entity).",
+      "fields": {
+        "address": {
+          "name": "Address",
+          "description": "Card number (e.g. \"1\") or \"all\" (all cards)."
+        },
+        "low_temp": {
+          "name": "Start temperature (°C)",
+          "description": "Temperature from which the fan starts (0-74 °C)."
+        },
+        "high_temp": {
+          "name": "Full-speed temperature (°C)",
+          "description": "Temperature at which the fan runs at full speed (1-75 °C, above the start temperature)."
+        },
+        "min_duty": {
+          "name": "Start threshold (%)",
+          "description": "Minimum start speed, in % of the maximum speed (0-100 %)."
+        }
+      }
+    },
     "set_group": {
       "name": "Create / edit a light group",
       "description": "Creates or edits a group of luminaires (members, name, color, icon, area) by rewriting groups.json — hot-reloaded, no restart. Call this service from Developer tools → Actions to attach or detach luminaires to a group from the UI.",

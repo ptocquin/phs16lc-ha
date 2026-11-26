@@ -23,10 +23,18 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_PORT, DOMAIN, entry_value, groups_file_for, recipes_dir_for_entry
+from .const import (
+    CONF_PORT,
+    DOMAIN,
+    FAMILY_LUMIATEC,
+    entry_value,
+    groups_file_for,
+    recipes_dir_for_entry,
+)
 from .coordinator import Phs16Coordinator
 from .groups import GROUP_ID_RE, GroupDef, load_groups, save_groups
 from .phs16ctl.controller import LuminaireError
+from .phs16ctl.protocol import FanSettings, validate_fan_settings
 
 SERVICES = (
     "scan",
@@ -38,6 +46,7 @@ SERVICES = (
     "delete_recipe",
     "set_channels",
     "set_channel",
+    "set_fan_settings",
     "set_group",
     "remove_group",
 )
@@ -223,6 +232,37 @@ async def _handle_set_channel(call: ServiceCall) -> None:
             base[channel - 1] = ma
             try:
                 await coordinator.async_set_channels(address, base)
+            except _ERRORS as exc:
+                raise HomeAssistantError(f"SPOT {address} : {exc}") from exc
+
+
+async def _handle_set_fan_settings(call: ServiceCall) -> None:
+    """Programme les paramètres ventilateur d'une carte (@SF, phs16-lc seul).
+
+    Action délibérément rare (réglage de la courbe thermique du SPOT), donc
+    exposée uniquement comme service — pas de contrôle dans les cartes Lovelace.
+    En lumiatec, @SF est le bitmask power/master : refusé.
+    """
+    try:
+        low_temp = int(call.data["low_temp"])
+        high_temp = int(call.data["high_temp"])
+        min_duty = int(call.data["min_duty"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ServiceValidationError(
+            f"champs low_temp / high_temp / min_duty requis (entiers) : {exc}"
+        ) from exc
+    settings = FanSettings(low_temp, high_temp, min_duty)
+    error = validate_fan_settings(settings)
+    if error is not None:
+        raise ServiceValidationError(f"paramètres ventilateur invalides : {error}")
+    for coordinator in _coordinators(call.hass):
+        if coordinator.family == FAMILY_LUMIATEC:
+            raise ServiceValidationError(
+                "pas de paramètres ventilateur en lumiatec — @SF y est le bitmask power/master"
+            )
+        for address in _addresses(call.data["address"], coordinator):
+            try:
+                await coordinator.async_set_fan_settings(address, low_temp, high_temp, min_duty)
             except _ERRORS as exc:
                 raise HomeAssistantError(f"SPOT {address} : {exc}") from exc
 
@@ -475,6 +515,7 @@ _HANDLERS = {
     "delete_recipe": _handle_delete_recipe,
     "set_channels": _handle_set_channels,
     "set_channel": _handle_set_channel,
+    "set_fan_settings": _handle_set_fan_settings,
     "set_group": _handle_set_group,
     "remove_group": _handle_remove_group,
 }

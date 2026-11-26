@@ -15,6 +15,7 @@ from custom_components.phs16lc.const import (
     EVENT_RECIPE_APPLIED,
     EVENT_SAVED,
 )
+from custom_components.phs16lc.phs16ctl.protocol import FanSettings
 
 from .fake_bus import FakePhsLink, FakeSpot
 from .test_config_flow import FLOW_DATA
@@ -71,6 +72,7 @@ async def test_services_registered_on_setup(hass, monkeypatch, tmp_path) -> None
         "delete_recipe",
         "set_channels",
         "set_channel",
+        "set_fan_settings",
         "set_group",
         "remove_group",
     ):
@@ -235,6 +237,69 @@ async def test_set_channel_service_patches_one_channel(hass, monkeypatch, tmp_pa
 
     with pytest.raises(HomeAssistantError):
         await _call(hass, "set_channel", {"address": "1", "channel": 17, "ma": 100})
+
+
+async def test_set_fan_settings_service_programs_spot(hass, monkeypatch, tmp_path) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    _, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=2)
+
+    await _call(
+        hass,
+        "set_fan_settings",
+        {"address": "1", "low_temp": 35, "high_temp": 65, "min_duty": 25},
+    )
+
+    assert bus[1].fan == (35, 65, 25)
+    assert coord.data.spots[1].fan_settings == FanSettings(35, 65, 25)
+    assert bus[2].fan == (40, 60, 30)  # carte 2 inchangée
+    link = FakePhsLink.instances[-1]
+    assert ("SF", 1, "35 65 25") in link.sent
+
+
+async def test_set_fan_settings_service_all(hass, monkeypatch, tmp_path) -> None:
+    bus = {1: FakeSpot(), 2: FakeSpot()}
+    _, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=2)
+
+    await _call(
+        hass,
+        "set_fan_settings",
+        {"address": "all", "low_temp": 40, "high_temp": 60, "min_duty": 30},
+    )
+
+    assert bus[1].fan == (40, 60, 30)
+    assert bus[2].fan == (40, 60, 30)
+    assert coord.data.spots[2].fan_settings == FanSettings(40, 60, 30)
+
+
+async def test_set_fan_settings_invalid_values_raise(hass, monkeypatch, tmp_path) -> None:
+    bus = {1: FakeSpot()}
+    await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
+
+    # courbe inversée (démarrage > pleine vitesse)
+    with pytest.raises(HomeAssistantError):
+        await _call(
+            hass,
+            "set_fan_settings",
+            {"address": "1", "low_temp": 70, "high_temp": 60, "min_duty": 30},
+        )
+    # hors bornes (démarrage max 74 °C)
+    with pytest.raises(HomeAssistantError):
+        await _call(
+            hass,
+            "set_fan_settings",
+            {"address": "1", "low_temp": 80, "high_temp": 75, "min_duty": 30},
+        )
+    # adresse inconnue
+    with pytest.raises(HomeAssistantError):
+        await _call(
+            hass,
+            "set_fan_settings",
+            {"address": "9", "low_temp": 40, "high_temp": 60, "min_duty": 30},
+        )
+    # rien n'a été envoyé sur le bus
+    link = FakePhsLink.instances[-1]
+    assert not [s for s in link.sent if s[0] == "SF"]
+    assert bus[1].fan == (40, 60, 30)
 
 
 async def test_scan_service(hass, monkeypatch, tmp_path) -> None:

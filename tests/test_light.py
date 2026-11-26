@@ -103,6 +103,19 @@ async def test_light_state_reflects_currents(hass, monkeypatch, tmp_path) -> Non
     assert s2.state == "off"
 
 
+async def test_light_exposes_fan_settings_attributes(hass, monkeypatch, tmp_path) -> None:
+    """Les paramètres ventilateur lus au polling (@GF) sont exposés en attributs du light
+    (affichés par la carte Lovelace dans la vue dépliée, sous les températures)."""
+    bus = {1: FakeSpot(fan=(42, 66, 20))}
+    entry, coord = await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
+
+    assert coord.data.spots[1].fan_settings is not None
+    s = hass.states.get(_light_id(hass, entry, 1))
+    assert s.attributes["fan_low_temp"] == 42
+    assert s.attributes["fan_high_temp"] == 66
+    assert s.attributes["fan_min_duty"] == 20
+
+
 async def test_light_non_uniform_recipe_shows_max(hass, monkeypatch, tmp_path) -> None:
     bus = {1: FakeSpot(currents=[800] * 8 + [0] * 8)}
     entry, _ = await _setup(hass, monkeypatch, bus, tmp_path, expected=1)
